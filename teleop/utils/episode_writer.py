@@ -102,11 +102,13 @@ class EpisodeWriter():
         self.color_dir = os.path.join(self.episode_dir, 'colors')
         self.depth_dir = os.path.join(self.episode_dir, 'depths')
         self.audio_dir = os.path.join(self.episode_dir, 'audios')
+        self.carpet_tactile_dir = os.path.join(self.episode_dir, 'carpet_tactiles')
         self.json_path = os.path.join(self.episode_dir, 'data.json')
         os.makedirs(self.episode_dir, exist_ok=True)
         os.makedirs(self.color_dir, exist_ok=True)
         os.makedirs(self.depth_dir, exist_ok=True)
         os.makedirs(self.audio_dir, exist_ok=True)
+        os.makedirs(self.carpet_tactile_dir, exist_ok=True)
         if self.rerun_log:
             self.online_logger = RerunLogger(prefix="online/", IdxRangeBoundary = 60, memory_limit="300MB")
 
@@ -114,7 +116,7 @@ class EpisodeWriter():
         logger_mp.info(f"==> New episode created: {self.episode_dir}")
         return True  # Return True if the episode is successfully created
         
-    def add_item(self, colors, depths=None, states=None, actions=None, tactiles=None, audios=None, sim_state=None):
+    def add_item(self, colors, depths=None, states=None, actions=None, tactiles=None, audios=None, sim_state=None, carpet_tactiles=None):
         # Increment the item ID
         self.item_id += 1
         # Create the item data dictionary
@@ -127,6 +129,7 @@ class EpisodeWriter():
             'tactiles': tactiles,
             'audios': audios,
             'sim_state': sim_state,
+            'carpet_tactiles': carpet_tactiles,
         }
         # Enqueue the item data
         self.item_data_queue.put(item_data)
@@ -153,6 +156,7 @@ class EpisodeWriter():
         colors = item_data.get('colors', {})
         depths = item_data.get('depths', {})
         audios = item_data.get('audios', {})
+        carpet_tactiles = item_data.get('carpet_tactiles', {})
 
         # Save images
         if colors:
@@ -176,6 +180,13 @@ class EpisodeWriter():
                 audio_name = f'audio_{str(idx).zfill(6)}_{mic}.npy'
                 np.save(os.path.join(self.audio_dir, audio_name), audio.astype(np.int16))
                 item_data['audios'][mic] = os.path.join('audios', audio_name)
+
+        if carpet_tactiles:
+            for carpet_key, carpet_data in carpet_tactiles.items():
+                carpet_name = f'carpet_{str(idx).zfill(6)}_{carpet_key}.npy'
+                np.save(os.path.join(self.carpet_tactile_dir, carpet_name), carpet_data.astype(np.float32))
+                item_data['carpet_tactiles'][carpet_key] = os.path.join(self.episode_dir, carpet_name)
+
 
         # Update episode data
         self.episode_data.append(item_data)

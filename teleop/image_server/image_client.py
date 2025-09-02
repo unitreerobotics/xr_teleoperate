@@ -9,8 +9,8 @@ import logging_mp
 logger_mp = logging_mp.get_logger(__name__)
 
 class ImageClient:
-    def __init__(self, tv_img_shape = None, tv_img_shm_name = None, wrist_img_shape = None, wrist_img_shm_name = None, 
-                       image_show = False, server_address = "192.168.123.164", port = 5555, Unit_Test = False):
+    def __init__(self, tv_img_shape = None, tv_img_shm_name = None, wrist_img_shape = None, wrist_img_shm_name = None,  
+                 third_img_shape = None, third_img_shm_name = None, image_show = False, server_address = "192.168.123.164", port = 5555, Unit_Test = False):
         """
         tv_img_shape: User's expected head camera resolution shape (H, W, C). It should match the output of the image service terminal.
 
@@ -36,6 +36,7 @@ class ImageClient:
 
         self.tv_img_shape = tv_img_shape
         self.wrist_img_shape = wrist_img_shape
+        self.third_img_shape = third_img_shape
 
         self.tv_enable_shm = False
         if self.tv_img_shape is not None and tv_img_shm_name is not None:
@@ -48,6 +49,12 @@ class ImageClient:
             self.wrist_image_shm = shared_memory.SharedMemory(name=wrist_img_shm_name)
             self.wrist_img_array = np.ndarray(wrist_img_shape, dtype = np.uint8, buffer = self.wrist_image_shm.buf)
             self.wrist_enable_shm = True
+
+        self.third_enable_shm = False
+        if self.third_img_shape is not None and third_img_shm_name is not None:
+            self.third_image_shm = shared_memory.SharedMemory(name=third_img_shm_name)
+            self.third_img_array = np.ndarray(third_img_shape, dtype = np.uint8, buffer = self.third_image_shm.buf)
+            self.third_enable_shm = True
 
         # Performance evaluation parameters
         self._enable_performance_eval = Unit_Test
@@ -164,6 +171,9 @@ class ImageClient:
                 if self.wrist_enable_shm:
                     np.copyto(self.wrist_img_array, np.array(current_image[:, -self.wrist_img_shape[1]:]))
                 
+                if self.third_enable_shm:
+                    np.copyto(self.third_img_array, np.array(current_image[:, -self.third_img_shape[1]:]))
+
                 if self._image_show:
                     height, width = current_image.shape[:2]
                     resized_image = cv2.resize(current_image, (width // 2, height // 2))
