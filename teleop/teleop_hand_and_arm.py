@@ -128,7 +128,7 @@ if __name__ == '__main__':
         if args.motion:
             if args.xr_mode == "controller":
                 loco_wrapper = LocoClientWrapper()
-        else:
+        elif not args.sim:
             motion_switcher = MotionSwitcher()
             status, result = motion_switcher.Enter_Debug_Mode()
             logger_mp.info(f"Enter debug mode: {'Success' if status == 0 else 'Failed'}")
@@ -484,7 +484,7 @@ if __name__ == '__main__':
             logger_mp.error(f"Failed to close televuer wrapper: {e}")
 
         try:
-            if not args.motion:
+            if not args.motion and not args.sim:
                 status, result = motion_switcher.Exit_Debug_Mode()
                 logger_mp.info(f"Exit debug mode: {'Success' if status == 3104 else 'Failed'}")
         except Exception as e:
