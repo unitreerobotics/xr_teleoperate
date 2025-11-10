@@ -122,8 +122,9 @@ if __name__ == '__main__':
                                      binocular=camera_config['head_camera']['binocular'],
                                      img_shape=camera_config['head_camera']['image_shape'],
                                      webrtc=camera_config['head_camera']['enable_webrtc'],
-                                     webrtc_url=f"https://{args.img_server_ip}:{camera_config['head_camera']['webrtc_port']}/offer")
-        
+                                     webrtc_url=f"https://{args.img_server_ip}:{camera_config['head_camera']['webrtc_port']}/offer",
+                                     display_fps=camera_config['head_camera']['fps'])
+
         # motion mode (G1: Regular mode R1+X, not Running mode R2+A)
         if args.motion:
             if args.xr_mode == "controller":
