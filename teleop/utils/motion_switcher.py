@@ -33,6 +33,7 @@ class MotionSwitcher:
 
 class LocoClientWrapper:
     def __init__(self):
+        ChannelFactoryInitialize(0)
         self.client = LocoClient()
         self.client.SetTimeout(0.0001)
         self.client.Init()
