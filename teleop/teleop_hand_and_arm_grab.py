@@ -388,7 +388,7 @@ if __name__ == '__main__':
             if args.ee == "fake_dex":
                 fake_q14 = np.zeros(14,dtype=np.float64)
 
-                # if left_trigger:
+                # if left_trigger: 
                 #     fake_q14[:7] = grab_pose_left
                 if left_trigger:
                     fake_q14[:7] = grab_pose_left
