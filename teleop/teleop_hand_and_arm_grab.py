@@ -2,7 +2,7 @@ import ctypes
 import os
 
 # 把你 conda 环境里的新版 libstdc++ 提前塞进进程，全局可见
-# ctypes.CDLL("/opt/miniconda3/envs/xr_tele/lib/libstdc++.so.6", mode=ctypes.RTLD_GLOBAL)
+ctypes.CDLL("/opt/miniconda3/envs/xr_tele/lib/libstdc++.so.6", mode=ctypes.RTLD_GLOBAL)
 
 
 import numpy as np
@@ -303,8 +303,8 @@ if __name__ == '__main__':
         arm_ctrl.speed_gradual_max()
 
         grab_pose_right = np.array([0,-1.0,-1.0,1.4,1.3,1.4,1.3])
-        grab_pose_left = np.array([0,1.0,1.0,-1.4,-1.3,-1.4,-1.3])
-        open_pose = np.array([0,0,0,0,0,0,0])
+        grab_pose_left = np.array([0.5,1.0,1.50,-1.40,-1.60,-1.40,-1.60]) # HIVE-INFO: Original: 0,1.0,1.0,-1.4,-1.3,-1.4,-1.3
+        open_pose = np.array([0.5,0,0,0,0,0,0])
 
         while not STOP:
             start_time = time.time()
