@@ -101,12 +101,17 @@ if __name__ == '__main__':
     parser.add_argument('--affinity', action = 'store_true', help = 'Enable high priority and set CPU affinity')
     parser.add_argument('--ipc', action = 'store_true', help = 'Enable IPC server to handle input; otherwise enable sshkeyboard')
     parser.add_argument('--record', action = 'store_true', help = 'Enable data recording')
+    parser.add_argument('--record-side', type=str, choices=['both', 'left', 'right'], default='both',
+                        help='Which side to store in recorded states/actions')
     parser.add_argument('--task-dir', type = str, default = './utils/data/', help = 'path to save data')
     parser.add_argument('--task-name', type = str, default = 'pick cube', help = 'task name for recording')
     parser.add_argument('--task-desc', type = str, default = 'e.g. pick the red cube on the table.', help = 'task goal for recording')
 
     args = parser.parse_args()
     logger_mp.info(f"args: {args}")
+
+    record_left = args.record_side in ("left", "both")
+    record_right = args.record_side in ("right", "both")
 
     try:
         # ipc communication. client usage: see utils/ipc.py
@@ -471,6 +476,15 @@ if __name__ == '__main__':
                 right_arm_state = current_lr_arm_q[-7:]
                 left_arm_action = sol_q[:7]
                 right_arm_action = sol_q[-7:]
+                # apply recording-side filter
+                rec_left_arm_state = left_arm_state.tolist() if record_left else []
+                rec_right_arm_state = right_arm_state.tolist() if record_right else []
+                rec_left_arm_action = left_arm_action.tolist() if record_left else []
+                rec_right_arm_action = right_arm_action.tolist() if record_right else []
+                rec_left_ee_state = left_ee_state if record_left else []
+                rec_right_ee_state = right_ee_state if record_right else []
+                rec_left_ee_action = left_hand_action if record_left else []
+                rec_right_ee_action = right_hand_action if record_right else []
                 if RECORD_RUNNING:
                     colors = {}
                     depths = {}
@@ -487,22 +501,22 @@ if __name__ == '__main__':
                             colors[f"color_{2}"] = current_wrist_image[:, wrist_img_shape[1]//2:]
                     states = {
                         "left_arm": {                                                                    
-                            "qpos":   left_arm_state.tolist(),    # numpy.array -> list
+                            "qpos":   rec_left_arm_state,    # numpy.array -> list
                             "qvel":   [],                          
                             "torque": [],                        
                         }, 
                         "right_arm": {                                                                    
-                            "qpos":   right_arm_state.tolist(),       
+                            "qpos":   rec_right_arm_state,       
                             "qvel":   [],                          
                             "torque": [],                         
                         },                        
                         "left_ee": {                                                                    
-                            "qpos":   left_ee_state,           
+                            "qpos":   rec_left_ee_state,           
                             "qvel":   [],                           
                             "torque": [],                          
                         }, 
                         "right_ee": {                                                                    
-                            "qpos":   right_ee_state,       
+                            "qpos":   rec_right_ee_state,       
                             "qvel":   [],                           
                             "torque": [],  
                         }, 
@@ -512,22 +526,22 @@ if __name__ == '__main__':
                     }
                     actions = {
                         "left_arm": {                                   
-                            "qpos":   left_arm_action.tolist(),       
+                            "qpos":   rec_left_arm_action,       
                             "qvel":   [],       
                             "torque": [],      
                         }, 
                         "right_arm": {                                   
-                            "qpos":   right_arm_action.tolist(),       
+                            "qpos":   rec_right_arm_action,       
                             "qvel":   [],       
                             "torque": [],       
                         },                         
                         "left_ee": {                                   
-                            "qpos":   left_hand_action,       
+                            "qpos":   rec_left_ee_action,       
                             "qvel":   [],       
                             "torque": [],       
                         }, 
                         "right_ee": {                                   
-                            "qpos":   right_hand_action,       
+                            "qpos":   rec_right_ee_action,       
                             "qvel":   [],       
                             "torque": [], 
                         }, 
