@@ -22,3 +22,4 @@ __MACOSX/
 teleop/data/
 episode_0*
 .vscode/
+teleop/joycon_hand_demo.py
