@@ -1,0 +1,1 @@
+python teleop_hand_and_arm.py --input-mode=hand  --display-mode=immersive --ee=inspire_ftp --record
