@@ -161,6 +161,7 @@ class EpisodeWriter():
                 self._save_episode()
 
     def _process_item_data(self, item_data):
+        # logger_mp.info(f"[WRITER_IN] idx={idx} has_states={item_data.get('states') is not None} has_actions={item_data.get('actions') is not None} keys={list(item_data.keys())}")
         idx = item_data['idx']
         colors = item_data.get('colors', {})
         depths = item_data.get('depths', {})
@@ -193,6 +194,7 @@ class EpisodeWriter():
         with open(self.json_path, "a", encoding="utf-8") as f:
             if not self.first_item:
                 f.write(",\n")
+            logger_mp.info(f"[WRITER_BEFORE_DUMP] idx={idx} states_keys={list(item_data['states'].keys()) if item_data.get('states') else None}")
             f.write(json.dumps(item_data, ensure_ascii=False, indent=4))
             self.first_item = False
 
