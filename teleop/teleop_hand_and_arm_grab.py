@@ -390,11 +390,17 @@ if __name__ == '__main__':
         KP_MOVE = 1.5
         KD_MOVE = 0.2
 
-        KP_HOLD = 0.8      # soft hold like your hand_controller.py
+        KP_HOLD = 0.6      # soft hold like your hand_controller.py
         KD_HOLD = 0.2
 
-        PRESS_THRESH = 0.4       # tune
-        TORQUE_THRESH = 400000.0  # tune (tau_est units depend on firmware)
+        # Activation thresholds (higher - to start holding)
+        PRESS_THRESH_ACTIVATE = 0.4       # tune
+        TORQUE_THRESH_ACTIVATE = 300000.0  # tune (tau_est units depend on firmware)
+        
+        # Deactivation thresholds (lower - to release hold)
+        PRESS_THRESH_DEACTIVATE = 0.2     # tune lower than activate
+        TORQUE_THRESH_DEACTIVATE = 100000.0  # tune lower than activate
+        
         SQUEEZE_OFFSET = 0.05     # small extra close when contact happens
         
         # --- Tare (recalibration) tracking ---
@@ -607,8 +613,20 @@ if __name__ == '__main__':
                 rpress_max = float(np.max(right_press_corr)) if 'right_press_corr' in locals() else float(np.max(right_press))
                 lpress_max = float(np.max(left_press_corr))  if 'left_press_corr'  in locals() else float(np.max(left_press))
 
-                right_contact = (rpress_max > PRESS_THRESH) or (float(np.max(np.abs(right_tau))) > TORQUE_THRESH)
-                left_contact  = (lpress_max > PRESS_THRESH) or (float(np.max(np.abs(left_tau)))  > TORQUE_THRESH)
+                # Use hysteresis: higher thresholds to activate, lower to deactivate
+                if right_hold_active:
+                    # Already holding - use lower threshold to stay in hold (prevents vibration)
+                    right_contact = (rpress_max > PRESS_THRESH_DEACTIVATE) or (float(np.max(np.abs(right_tau))) > TORQUE_THRESH_DEACTIVATE)
+                else:
+                    # Not holding - use higher threshold to activate
+                    right_contact = (rpress_max > PRESS_THRESH_ACTIVATE) or (float(np.max(np.abs(right_tau))) > TORQUE_THRESH_ACTIVATE)
+                
+                if left_hold_active:
+                    # Already holding - use lower threshold to stay in hold (prevents vibration)
+                    left_contact  = (lpress_max > PRESS_THRESH_DEACTIVATE) or (float(np.max(np.abs(left_tau)))  > TORQUE_THRESH_DEACTIVATE)
+                else:
+                    # Not holding - use higher threshold to activate
+                    left_contact  = (lpress_max > PRESS_THRESH_ACTIVATE) or (float(np.max(np.abs(left_tau)))  > TORQUE_THRESH_ACTIVATE)
 
                 # ---------------- RIGHT hand ----------------
                 if right_trigger:
