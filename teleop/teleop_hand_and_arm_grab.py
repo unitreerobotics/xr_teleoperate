@@ -150,30 +150,43 @@ if __name__ == '__main__':
             }
         else:
             # HIVE-INFO: This config is for only a single camera (head)
+            #img_config = {
+            #    'fps': 30,
+            #    'head_camera_type': 'realsense',
+            #    'head_camera_image_shape': [480, 640],  # Head camera resolution
+            #    'head_camera_id_numbers': ["233622072924"], #243722071701
+            #}
+            # HIVE-INFO: Use this config for extra cameras, adjust it accordingly.
             # img_config = {
             #     'fps': 30,
             #     'head_camera_type': 'realsense',
             #     'head_camera_image_shape': [480, 640],  # Head camera resolution
             #     'head_camera_id_numbers': ["233622072924"],
+            #     'wrist_camera_type': 'opencv',
+            #     'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+            #     'wrist_camera_id_numbers': [8,6],
             # }
-            # HIVE-INFO: Use this config for extra cameras, adjust it accordingly.
+            # HIVE-INFO: Use this config for a single extra camera, adjust it accordingly.
             img_config = {
-                'fps': 30,
-                'head_camera_type': 'realsense',
-                'head_camera_image_shape': [480, 640],  # Head camera resolution
-                'head_camera_id_numbers': ["233622072924"],
-                'wrist_camera_type': 'opencv',
-                'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
-                'wrist_camera_id_numbers': [8,6],
-            }
+                 'fps': 30,
+                 'head_camera_type': 'realsense',
+                 'head_camera_image_shape': [480, 640],  # Head camera resolution
+                 'head_camera_id_numbers': ["233622072924"],
+                 'wrist_camera_type': 'opencv',
+                 'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+                 'wrist_camera_id_numbers': [6,8],
+             }
 
         ASPECT_RATIO_THRESHOLD = 2.0 # If the aspect ratio exceeds this value, it is considered binocular
+        WRIST_2CAM = False
         if len(img_config['head_camera_id_numbers']) > 1 or (img_config['head_camera_image_shape'][1] / img_config['head_camera_image_shape'][0] > ASPECT_RATIO_THRESHOLD):
             BINOCULAR = True
         else:
             BINOCULAR = False
         if 'wrist_camera_type' in img_config:
             WRIST = True
+            if len(img_config['wrist_camera_id_numbers']) > 1 :
+                WRIST_2CAM = True
         else:
             WRIST = False
         
@@ -191,13 +204,22 @@ if __name__ == '__main__':
             wrist_img_array = np.ndarray(wrist_img_shape, dtype = np.uint8, buffer = wrist_img_shm.buf)
             img_client = ImageClient(tv_img_shape = tv_img_shape, tv_img_shm_name = tv_img_shm.name, 
                                     wrist_img_shape = wrist_img_shape, wrist_img_shm_name = wrist_img_shm.name, server_address="127.0.0.1")
-        elif WRIST and not args.sim:
+        elif WRIST and WRIST_2CAM and not args.sim:
+            print("----- dual wrist camera mode")
             wrist_img_shape = (img_config['wrist_camera_image_shape'][0], img_config['wrist_camera_image_shape'][1] * 2, 3)
             wrist_img_shm = shared_memory.SharedMemory(create = True, size = np.prod(wrist_img_shape) * np.uint8().itemsize)
             wrist_img_array = np.ndarray(wrist_img_shape, dtype = np.uint8, buffer = wrist_img_shm.buf)
             img_client = ImageClient(tv_img_shape = tv_img_shape, tv_img_shm_name = tv_img_shm.name, 
                                     wrist_img_shape = wrist_img_shape, wrist_img_shm_name = wrist_img_shm.name)
+        elif WRIST and not WRIST_2CAM and not args.sim:
+            print("----- single wrist camera mode")
+            wrist_img_shape = (img_config['wrist_camera_image_shape'][0], img_config['wrist_camera_image_shape'][1], 3)
+            wrist_img_shm = shared_memory.SharedMemory(create = True, size = np.prod(wrist_img_shape) * np.uint8().itemsize)
+            wrist_img_array = np.ndarray(wrist_img_shape, dtype = np.uint8, buffer = wrist_img_shm.buf)
+            img_client = ImageClient(tv_img_shape = tv_img_shape, tv_img_shm_name = tv_img_shm.name, 
+                                    wrist_img_shape = wrist_img_shape, wrist_img_shm_name = wrist_img_shm.name)
         else:
+            print("----- no wrist camera mode")
             img_client = ImageClient(tv_img_shape = tv_img_shape, tv_img_shm_name = tv_img_shm.name)
 
         image_receive_thread = threading.Thread(target = img_client.receive_process, daemon = True)
@@ -368,16 +390,16 @@ if __name__ == '__main__':
         KP_MOVE = 1.5
         KD_MOVE = 0.2
 
-        KP_HOLD = 0.4      # soft hold like your hand_controller.py
+        KP_HOLD = 0.8      # soft hold like your hand_controller.py
         KD_HOLD = 0.2
 
-        PRESS_THRESH = 0.30       # tune
-        TORQUE_THRESH = 200000.0  # tune (tau_est units depend on firmware)
+        PRESS_THRESH = 0.4       # tune
+        TORQUE_THRESH = 400000.0  # tune (tau_est units depend on firmware)
         SQUEEZE_OFFSET = 0.05     # small extra close when contact happens
         
         # --- Tare (recalibration) tracking ---
         TARE_DELAY = 0.5  # seconds to wait after trigger release before taring
-        V_MAX = 5.0  # rad/s - max velocity for right hand grip motion
+        V_MAX = 15.0  # rad/s - max velocity for right hand grip motion
         right_trigger_released_time = None
         left_trigger_released_time = None
         right_trigger_prev = False
@@ -759,13 +781,20 @@ if __name__ == '__main__':
                         colors[f"color_{0}"] = current_tv_image[:, :tv_img_shape[1]//2]
                         colors[f"color_{1}"] = current_tv_image[:, tv_img_shape[1]//2:]
                         if WRIST:
-                            colors[f"color_{2}"] = current_wrist_image[:, :wrist_img_shape[1]//2]
-                            colors[f"color_{3}"] = current_wrist_image[:, wrist_img_shape[1]//2:]
+                            if WRIST_2CAM:
+                                colors[f"color_{2}"] = current_wrist_image[:, :wrist_img_shape[1]//2]
+                                colors[f"color_{3}"] = current_wrist_image[:, wrist_img_shape[1]//2:]
+                            else:
+                                colors[f"color_{2}"] = current_wrist_image
+                            
                     else:
                         colors[f"color_{0}"] = current_tv_image
                         if WRIST:
-                            colors[f"color_{1}"] = current_wrist_image[:, :wrist_img_shape[1]//2]
-                            colors[f"color_{2}"] = current_wrist_image[:, wrist_img_shape[1]//2:]
+                            if WRIST_2CAM:
+                                colors[f"color_{1}"] = current_wrist_image[:, :wrist_img_shape[1]//2]
+                                colors[f"color_{2}"] = current_wrist_image[:, wrist_img_shape[1]//2:]
+                            else:
+                                colors[f"color_{1}"] = current_wrist_image
                     states = {
                         "left_arm": {                                                                    
                             "qpos":   left_arm_state.tolist(),    # numpy.array -> list
@@ -832,7 +861,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         logger_mp.info("KeyboardInterrupt, exiting program...")
     finally:
-        #arm_ctrl.ctrl_dual_arm_go_home()
+        arm_ctrl.ctrl_dual_arm_go_home()
 
         if args.ipc:
             ipc_server.stop()
