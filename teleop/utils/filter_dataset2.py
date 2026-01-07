@@ -3,8 +3,8 @@
 Filter episode folders episode_XXXX from a source directory into a new directory.
 
 - Filters episodes by index range [--init, --end]
-- Drops cameras by removing specified keys from step["colors"] in data.json
-- Drops joint groups (e.g. right_arm) by emptying their states/actions arrays and joint_names
+- Drops cameras by removing specified keys from step["colors"] in data.json [--drop_cameras]
+- Drops joint groups (e.g. right_arm) by emptying their states/actions arrays and joint_names [--drop_joint_groups]
 - Copies only referenced assets (so removed camera images are not copied)
 - Writes into a NEW destination folder; source is never modified.
 """
