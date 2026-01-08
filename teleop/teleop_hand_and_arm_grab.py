@@ -304,11 +304,11 @@ if __name__ == '__main__':
             press_base_samples = 0
             PRESS_BASE_N = 30  # ~1s at 30Hz
 
-            # “hold” memory (so once contact triggers, we keep holding)
-            right_hold_active = False
-            left_hold_active = False
-            right_hold_q = np.zeros(7, dtype=np.float64)
-            left_hold_q = np.zeros(7, dtype=np.float64)
+            # PER-MOTOR hold tracking (like hand_controller.py)
+            right_hold_logged = [False] * 7
+            left_hold_logged = [False] * 7
+            right_ramped_target = np.zeros(7, dtype=np.float64)
+            left_ramped_target = np.zeros(7, dtype=np.float64)
 
 
         elif args.ee == "fake_dex":
@@ -389,23 +389,22 @@ if __name__ == '__main__':
         # --- SmartGrip parameters ---
         KP_MOVE = 1.5
         KD_MOVE = 0.2
+        KP_HOLD = 0.4      # soft hold like hand_controller.py
+        KD_HOLD = 0.1
 
-        KP_HOLD = 0.6      # soft hold like your hand_controller.py
-        KD_HOLD = 0.2
-
-        # Activation thresholds (higher - to start holding)
-        PRESS_THRESH_ACTIVATE = 0.4       # tune
-        TORQUE_THRESH_ACTIVATE = 300000.0  # tune (tau_est units depend on firmware)
+        # Hysteresis thresholds (matching hand_controller.py)
+        PRESSURE_THRESHOLD = 0.20              # Higher - to ENTER hold
+        PRESSURE_THRESHOLD_BASE = 0.05         # Base sensor threshold (enter)
+        PRESSURE_THRESHOLD_EXIT = 0.15         # Lower - to EXIT hold (sticky)
+        PRESSURE_THRESHOLD_BASE_EXIT = 0.03    # Base sensor threshold (exit)
+        TORQUE_THRESHOLD_HIGH = 200000.0
         
-        # Deactivation thresholds (lower - to release hold)
-        PRESS_THRESH_DEACTIVATE = 0.2     # tune lower than activate
-        TORQUE_THRESH_DEACTIVATE = 100000.0  # tune lower than activate
-        
-        SQUEEZE_OFFSET = 0.05     # small extra close when contact happens
+        SQUEEZE_OFFSET = 0.08     # matching hand_controller.py
+        RAMP_FACTOR = 0.05        # smooth ramping
+        THUMB_COMPLETION_THRESHOLD = 0.05
         
         # --- Tare (recalibration) tracking ---
-        TARE_DELAY = 0.5  # seconds to wait after trigger release before taring
-        V_MAX = 15.0  # rad/s - max velocity for right hand grip motion
+        TARE_DELAY = 0.8  # seconds to wait after trigger release before taring
         right_trigger_released_time = None
         left_trigger_released_time = None
         right_trigger_prev = False
@@ -608,129 +607,210 @@ if __name__ == '__main__':
             elif args.ee == "dex3":
                 q14 = np.array(dual_hand_action_array[:], dtype=np.float64)
 
-                # contact detection
-                # (use corrected pressure if available)
-                rpress_max = float(np.max(right_press_corr)) if 'right_press_corr' in locals() else float(np.max(right_press))
-                lpress_max = float(np.max(left_press_corr))  if 'left_press_corr'  in locals() else float(np.max(left_press))
-
-                # Use hysteresis: higher thresholds to activate, lower to deactivate
-                if right_hold_active:
-                    # Already holding - use lower threshold to stay in hold (prevents vibration)
-                    right_contact = (rpress_max > PRESS_THRESH_DEACTIVATE) or (float(np.max(np.abs(right_tau))) > TORQUE_THRESH_DEACTIVATE)
-                else:
-                    # Not holding - use higher threshold to activate
-                    right_contact = (rpress_max > PRESS_THRESH_ACTIVATE) or (float(np.max(np.abs(right_tau))) > TORQUE_THRESH_ACTIVATE)
+                # Get corrected pressures (or fallback to raw)
+                right_press_corr = right_press_corr if 'right_press_corr' in locals() else right_press
+                left_press_corr = left_press_corr if 'left_press_corr' in locals() else left_press
                 
-                if left_hold_active:
-                    # Already holding - use lower threshold to stay in hold (prevents vibration)
-                    left_contact  = (lpress_max > PRESS_THRESH_DEACTIVATE) or (float(np.max(np.abs(left_tau)))  > TORQUE_THRESH_DEACTIVATE)
-                else:
-                    # Not holding - use higher threshold to activate
-                    left_contact  = (lpress_max > PRESS_THRESH_ACTIVATE) or (float(np.max(np.abs(left_tau)))  > TORQUE_THRESH_ACTIVATE)
+                # Extract finger pressures (matching hand_controller.py getFingerPressures)
+                # Right hand
+                right_thumb_tip = right_press_corr[1]
+                right_thumb_base = right_press_corr[0]
+                right_index_tip = right_press_corr[3]
+                right_index_base = right_press_corr[2]
+                right_middle_tip = right_press_corr[5]
+                right_middle_base = right_press_corr[4]
+                
+                # Left hand
+                left_thumb_tip = left_press_corr[1]
+                left_thumb_base = left_press_corr[0]
+                left_index_tip = left_press_corr[5]
+                left_index_base = left_press_corr[4]
+                left_middle_tip = left_press_corr[3]
+                left_middle_base = left_press_corr[2]
 
-                # ---------------- RIGHT hand ----------------
+                # ---------------- RIGHT hand (per-motor SmartGrip) ----------------
                 if right_trigger:
                     # take ownership while gripping
                     with right_hand_override.get_lock():
                         right_hand_override[0] = 1.0
 
-                    if right_contact:
-                        if not right_hold_active:
-                            right_hold_active = True
-                            # snap near current state and hold
-                            with dual_hand_data_lock:
-                                cur_r = np.array(dual_hand_state_array[-7:], dtype=np.float64)
-                            right_hold_q = cur_r + SQUEEZE_OFFSET * np.sign(grab_pose_right - cur_r)
-                        q14[-7:] = right_hold_q
-
-                        # lower kp (soft hold)
-                        for jid in Dex3_1_Right_JointIndex:
+                    # User is gripping - use palmar target with PER-MOTOR contact detection
+                    target_pose = grab_pose_right
+                    with dual_hand_data_lock:
+                        current_pos = np.array(dual_hand_state_array[-7:], dtype=np.float64)
+                    
+                    # Update thumb target with ramping (thumb moves first)
+                    final_thumb_target = target_pose[0]
+                    new_thumb_ramped = right_ramped_target[0] + (final_thumb_target - right_ramped_target[0]) * RAMP_FACTOR
+                    right_ramped_target[0] = new_thumb_ramped
+                    thumb_is_done = abs(new_thumb_ramped - final_thumb_target) < THUMB_COMPLETION_THRESHOLD
+                    
+                    # Process each motor individually
+                    for i, jid in enumerate(Dex3_1_Right_JointIndex):
+                        final_target = target_pose[i]
+                        
+                        # Determine thresholds based on current hold state (hysteresis)
+                        if right_hold_logged[i]:
+                            thresh_main = PRESSURE_THRESHOLD_EXIT       # Lower to exit
+                            thresh_base = PRESSURE_THRESHOLD_BASE_EXIT
+                        else:
+                            thresh_main = PRESSURE_THRESHOLD            # Higher to enter
+                            thresh_base = PRESSURE_THRESHOLD_BASE
+                        
+                        is_high_torque = abs(right_tau[i]) > TORQUE_THRESHOLD_HIGH
+                        should_hold = False
+                        
+                        # Per-motor pressure check (matching hand_controller.py logic)
+                        if i == 1:  # Thumb base
+                            should_hold = (right_thumb_base > thresh_main or right_thumb_tip > thresh_main or is_high_torque)
+                        elif i == 2:  # Thumb tip
+                            should_hold = (right_thumb_tip > thresh_main or is_high_torque)
+                        elif i == 3:  # Middle base (safety link)
+                            should_hold = (right_middle_base > thresh_base or right_middle_tip > thresh_main or is_high_torque)
+                        elif i == 4:  # Middle tip
+                            should_hold = (right_middle_tip > thresh_main or is_high_torque)
+                        elif i == 5:  # Index base (safety link)
+                            should_hold = (right_index_base > thresh_base or right_index_tip > thresh_main or is_high_torque)
+                        elif i == 6:  # Index tip
+                            should_hold = (right_index_tip > thresh_main or is_high_torque)
+                        
+                        if should_hold:
+                            # Enter or maintain hold
+                            if not right_hold_logged[i]:
+                                # First contact - snap to smart target
+                                direction = 1.0 if target_pose[i] > current_pos[i] else -1.0
+                                smart_target = current_pos[i] + (SQUEEZE_OFFSET * direction)
+                                right_ramped_target[i] = smart_target
+                                logger_mp.debug(f"[RIGHT] Joint {i} contact! Snapped to {smart_target:.2f}")
+                                right_hold_logged[i] = True
+                            
+                            # Hold with soft gains
+                            dex3_right_msg.motor_cmd[jid].q = right_ramped_target[i]
                             dex3_right_msg.motor_cmd[jid].kp = KP_HOLD
                             dex3_right_msg.motor_cmd[jid].kd = KD_HOLD
-                    else:
-                        right_hold_active = False
-                        with dual_hand_data_lock:
-                            cur = np.array(dual_hand_state_array[-7:], dtype=np.float64)
-
-                        target = grab_pose_right
-                        dt = 1.0 / args.frequency
-
-                        dq = target - cur
-                        dq = np.clip(dq, -V_MAX * dt, V_MAX * dt)
-
-                        q14[-7:] = cur + dq
-                        for jid in Dex3_1_Right_JointIndex:
+                        else:
+                            # Continue moving (only if thumb is done or this is thumb)
+                            if i == 0 or thumb_is_done:
+                                new_ramped = right_ramped_target[i] + (final_target - right_ramped_target[i]) * RAMP_FACTOR
+                                right_ramped_target[i] = new_ramped
+                            
+                            dex3_right_msg.motor_cmd[jid].q = right_ramped_target[i]
                             dex3_right_msg.motor_cmd[jid].kp = KP_MOVE
                             dex3_right_msg.motor_cmd[jid].kd = KD_MOVE
+                            right_hold_logged[i] = False
+                    
+                    # Update q14 for recording
+                    q14[-7:] = right_ramped_target
 
                 else:
-                    right_hold_active = False
+                    # Trigger released - open hand and reset hold states
                     with right_hand_override.get_lock():
                         right_hand_override[0] = 0.0
 
-                    # IMPORTANT:
-                    # If you want XR tracking when trigger is released, DON'T force open_pose here.
-                    # Easiest behavior: keep open_pose (like original). If you want XR, comment next line.
-                    q14[-7:] = open_pose
-
-                    for jid in Dex3_1_Right_JointIndex:
+                    for i, jid in enumerate(Dex3_1_Right_JointIndex):
+                        # Ramp towards open position
+                        new_ramped = right_ramped_target[i] + (open_pose[i] - right_ramped_target[i]) * RAMP_FACTOR
+                        right_ramped_target[i] = new_ramped
+                        
+                        dex3_right_msg.motor_cmd[jid].q = right_ramped_target[i]
                         dex3_right_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_right_msg.motor_cmd[jid].kd = KD_MOVE
+                        right_hold_logged[i] = False
+                    
+                    q14[-7:] = right_ramped_target
 
-                # ---------------- LEFT hand ----------------
+                # ---------------- LEFT hand (per-motor SmartGrip) ----------------
                 if left_trigger:
                     with left_hand_override.get_lock():
                         left_hand_override[0] = 1.0
 
-                    if left_contact:
-                        if not left_hold_active:
-                            left_hold_active = True
-                            with dual_hand_data_lock:
-                                cur_l = np.array(dual_hand_state_array[:7], dtype=np.float64)
-                            left_hold_q = cur_l + SQUEEZE_OFFSET * np.sign(grab_pose_left - cur_l)
-                        q14[:7] = left_hold_q
-
-                        for jid in Dex3_1_Left_JointIndex:
+                    # User is gripping - use palmar target with PER-MOTOR contact detection
+                    target_pose = grab_pose_left
+                    with dual_hand_data_lock:
+                        current_pos = np.array(dual_hand_state_array[:7], dtype=np.float64)
+                    
+                    # Update thumb target with ramping (thumb moves first)
+                    final_thumb_target = target_pose[0]
+                    new_thumb_ramped = left_ramped_target[0] + (final_thumb_target - left_ramped_target[0]) * RAMP_FACTOR
+                    left_ramped_target[0] = new_thumb_ramped
+                    thumb_is_done = abs(new_thumb_ramped - final_thumb_target) < THUMB_COMPLETION_THRESHOLD
+                    
+                    # Process each motor individually
+                    for i, jid in enumerate(Dex3_1_Left_JointIndex):
+                        final_target = target_pose[i]
+                        
+                        # Determine thresholds based on current hold state (hysteresis)
+                        if left_hold_logged[i]:
+                            thresh_main = PRESSURE_THRESHOLD_EXIT       # Lower to exit
+                            thresh_base = PRESSURE_THRESHOLD_BASE_EXIT
+                        else:
+                            thresh_main = PRESSURE_THRESHOLD            # Higher to enter
+                            thresh_base = PRESSURE_THRESHOLD_BASE
+                        
+                        is_high_torque = abs(left_tau[i]) > TORQUE_THRESHOLD_HIGH
+                        should_hold = False
+                        
+                        # Per-motor pressure check (matching hand_controller.py logic for LEFT)
+                        if i == 1:  # Thumb base
+                            should_hold = (left_thumb_base > thresh_main or left_thumb_tip > thresh_main or is_high_torque)
+                        elif i == 2:  # Thumb tip
+                            should_hold = (left_thumb_tip > thresh_main or is_high_torque)
+                        elif i == 3:  # Middle base (safety link)
+                            should_hold = (left_middle_base > thresh_base or left_middle_tip > thresh_main or is_high_torque)
+                        elif i == 4:  # Middle tip
+                            should_hold = (left_middle_tip > thresh_main or is_high_torque)
+                        elif i == 5:  # Index base (safety link)
+                            should_hold = (left_index_base > thresh_base or left_index_tip > thresh_main or is_high_torque)
+                        elif i == 6:  # Index tip
+                            should_hold = (left_index_tip > thresh_main or is_high_torque)
+                        
+                        if should_hold:
+                            # Enter or maintain hold
+                            if not left_hold_logged[i]:
+                                # First contact - snap to smart target
+                                direction = 1.0 if target_pose[i] > current_pos[i] else -1.0
+                                smart_target = current_pos[i] + (SQUEEZE_OFFSET * direction)
+                                left_ramped_target[i] = smart_target
+                                logger_mp.debug(f"[LEFT] Joint {i} contact! Snapped to {smart_target:.2f}")
+                                left_hold_logged[i] = True
+                            
+                            # Hold with soft gains
+                            dex3_left_msg.motor_cmd[jid].q = left_ramped_target[i]
                             dex3_left_msg.motor_cmd[jid].kp = KP_HOLD
                             dex3_left_msg.motor_cmd[jid].kd = KD_HOLD
-                    else:
-                        left_hold_active = False
-                        with dual_hand_data_lock:
-                            cur = np.array(dual_hand_state_array[:7], dtype=np.float64)
-
-                        target = grab_pose_left
-                        dt = 1.0 / args.frequency
-
-                        dq = target - cur
-                        dq = np.clip(dq, -V_MAX * dt, V_MAX * dt)
-
-                        q14[:7] = cur + dq
-
-                        for jid in Dex3_1_Left_JointIndex:
+                        else:
+                            # Continue moving (only if thumb is done or this is thumb)
+                            if i == 0 or thumb_is_done:
+                                new_ramped = left_ramped_target[i] + (final_target - left_ramped_target[i]) * RAMP_FACTOR
+                                left_ramped_target[i] = new_ramped
+                            
+                            dex3_left_msg.motor_cmd[jid].q = left_ramped_target[i]
                             dex3_left_msg.motor_cmd[jid].kp = KP_MOVE
                             dex3_left_msg.motor_cmd[jid].kd = KD_MOVE
+                            left_hold_logged[i] = False
+                    
+                    # Update q14 for recording
+                    q14[:7] = left_ramped_target
 
                 else:
-                    left_hold_active = False
+                    # Trigger released - open hand and reset hold states
                     with left_hand_override.get_lock():
                         left_hand_override[0] = 0.0
 
-                    # same note as right side
-                    q14[:7] = open_pose
-
-                    for jid in Dex3_1_Left_JointIndex:
+                    for i, jid in enumerate(Dex3_1_Left_JointIndex):
+                        # Ramp towards open position
+                        new_ramped = left_ramped_target[i] + (open_pose[i] - left_ramped_target[i]) * RAMP_FACTOR
+                        left_ramped_target[i] = new_ramped
+                        
+                        dex3_left_msg.motor_cmd[jid].q = left_ramped_target[i]
                         dex3_left_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_left_msg.motor_cmd[jid].kd = KD_MOVE
+                        left_hold_logged[i] = False
+                    
+                    q14[:7] = left_ramped_target
 
-
-                right7 = q14[-7:]
-                for i, jid in enumerate(Dex3_1_Right_JointIndex):
-                    dex3_right_msg.motor_cmd[jid].q = right7[i]
+                # Publish the commands (q values already set in per-motor loops above)
                 dex3_right_pub.Write(dex3_right_msg)
-
-                left7 = q14[:7]
-                for i, jid in enumerate(Dex3_1_Left_JointIndex):
-                    dex3_left_msg.motor_cmd[jid].q = left7[i]
                 dex3_left_pub.Write(dex3_left_msg)
 
                 # keep recorded actions in sync with the commands we just sent
