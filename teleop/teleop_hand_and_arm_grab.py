@@ -389,8 +389,8 @@ if __name__ == '__main__':
         # --- SmartGrip parameters ---
         KP_MOVE = 1.5
         KD_MOVE = 0.2
-        KP_HOLD = 0.4      # soft hold like hand_controller.py
-        KD_HOLD = 0.1
+        KP_HOLD = 0.8      # soft hold like hand_controller.py
+        KD_HOLD = 0.2
 
         # Hysteresis thresholds (matching hand_controller.py)
         PRESSURE_THRESHOLD = 0.20              # Higher - to ENTER hold
@@ -404,11 +404,20 @@ if __name__ == '__main__':
         THUMB_COMPLETION_THRESHOLD = 0.05
         
         # --- Tare (recalibration) tracking ---
-        TARE_DELAY = 0.8  # seconds to wait after trigger release before taring
+        TARE_DELAY = 0.6  # seconds to wait after trigger release before taring
         right_trigger_released_time = None
         left_trigger_released_time = None
         right_trigger_prev = False
         left_trigger_prev = False
+        
+        # Initialize ramped targets from current hand position (prevent jumps)
+        if args.ee == "dex3":
+            logger_mp.info("Waiting for initial hand state...")
+            time.sleep(0.5)  # Give time for state to arrive
+            with dual_hand_data_lock:
+                right_ramped_target[:] = np.array(dual_hand_state_array[-7:], dtype=np.float64)
+                left_ramped_target[:] = np.array(dual_hand_state_array[:7], dtype=np.float64)
+            logger_mp.info(f"Initialized ramped targets - Right: {right_ramped_target}, Left: {left_ramped_target}")
         
         loop_idx = 0
         while not STOP:
@@ -701,6 +710,10 @@ if __name__ == '__main__':
                     
                     # Update q14 for recording
                     q14[-7:] = right_ramped_target
+                    
+                    # Print torque values when gripping (every 10 loops ~0.33s at 30Hz)
+                    if loop_idx % 10 == 0:
+                        logger_mp.info(f"[RIGHT TORQUES] {right_tau}")
 
                 else:
                     # Trigger released - open hand and reset hold states
@@ -791,6 +804,10 @@ if __name__ == '__main__':
                     
                     # Update q14 for recording
                     q14[:7] = left_ramped_target
+                    
+                    # Print torque values when gripping (every 10 loops ~0.33s at 30Hz)
+                    if loop_idx % 10 == 0:
+                        logger_mp.info(f"[LEFT TORQUES] {left_tau}")
 
                 else:
                     # Trigger released - open hand and reset hold states
