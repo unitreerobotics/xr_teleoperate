@@ -3,8 +3,8 @@
 Filter episode folders episode_XXXX from a source directory into a new directory.
 
 - Filters episodes by index range [--init, --end]
-- Drops cameras by removing specified keys from step["colors"] in data.json [--drop_cameras]
-- Drops joint groups (e.g. right_arm) by emptying their states/actions arrays and joint_names [--drop_joint_groups]
+- Drops cameras by removing specified keys from step["colors"] in data.json
+- Drops joint groups (e.g. right_arm) by emptying their states/actions arrays and joint_names
 - Copies only referenced assets (so removed camera images are not copied)
 - Writes into a NEW destination folder; source is never modified.
 """
@@ -35,6 +35,7 @@ def drop_group_in_step(step: Dict[str, Any], group: str) -> None:
         sec = step.get(section_key)
         if isinstance(sec, dict):
             sec.pop(group, None) # Remove entire group if exists
+
 
 def collect_referenced_files(data_json: Dict[str, Any]) -> Set[str]:
     """
@@ -96,6 +97,13 @@ def main() -> None:
         help="Comma-separated joint groups to DROP completely (e.g. right_arm,right_ee). Clears states/actions arrays and joint_names.",
     )
 
+    # Replace prompt 
+    ap.add_argument(
+        "--replace_prompt",
+        default=None,
+        help="String to replace dataset prompt with (for all episodes). If not set, original prompts are kept.",
+    )
+    
     args = ap.parse_args()
 
     src = Path(args.src).expanduser().resolve()
@@ -109,6 +117,7 @@ def main() -> None:
 
     drop_cameras = parse_csv_set(args.drop_cameras)
     drop_joint_groups = parse_csv_set(args.drop_joint_groups)
+    replace_prompt = parse_csv_set(args.replace_prompt)
 
     dst_parent = Path(args.dst_parent).expanduser().resolve() if args.dst_parent else src.parent
     dst = dst_parent / f"{src.name}{args.suffix}"
@@ -161,6 +170,8 @@ def main() -> None:
         print(f"Drop colors: {sorted(drop_cameras)}")
     if drop_joint_groups:
         print(f"Drop joint groups: {sorted(drop_joint_groups)}")
+    if replace_prompt:
+        print(f"Replace prompt with: {args.replace_prompt}")
     print("")
 
     for ep_idx, ep_path in selected:
@@ -213,9 +224,15 @@ def main() -> None:
                             tn.pop(group, None)
                     info["tactile_names"] = tn
                     dj["info"] = info
-                    dj["info"] = info
+                    
+        # 3) Replace prompt if specified
+        if args.replace_prompt:
+            rp = dj.get("text", {}).get("goal")
+            if isinstance(rp, str):
+                print(f"Episode {ep_path.name}: Replacing prompt '{rp}' with '{args.replace_prompt}'")
+                dj.setdefault("text", {})["goal"] = args.replace_prompt
 
-        # 3) Collect referenced assets AFTER filtering (so dropped cameras won't be copied)
+        # 4) Collect referenced assets AFTER filtering (so dropped cameras won't be copied)
         refs = collect_referenced_files(dj)
 
         if args.dry_run:
