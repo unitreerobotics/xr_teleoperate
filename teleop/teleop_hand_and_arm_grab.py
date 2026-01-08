@@ -400,7 +400,7 @@ if __name__ == '__main__':
         TORQUE_THRESHOLD_HIGH = 200000.0
         
         SQUEEZE_OFFSET = 0.08     # matching hand_controller.py
-        RAMP_FACTOR = 0.05        # smooth ramping
+        RAMP_FACTOR = 0.20        # smooth ramping
         THUMB_COMPLETION_THRESHOLD = 0.05
         
         # --- Tare (recalibration) tracking ---
@@ -716,16 +716,15 @@ if __name__ == '__main__':
                         logger_mp.info(f"[RIGHT TORQUES] {right_tau}")
 
                 else:
-                    # Trigger released - open hand and reset hold states
+                    # Trigger released - open hand instantly (no ramping)
                     with right_hand_override.get_lock():
                         right_hand_override[0] = 0.0
 
                     for i, jid in enumerate(Dex3_1_Right_JointIndex):
-                        # Ramp towards open position
-                        new_ramped = right_ramped_target[i] + (open_pose[i] - right_ramped_target[i]) * RAMP_FACTOR
-                        right_ramped_target[i] = new_ramped
+                        # Direct open - no ramping for faster release
+                        right_ramped_target[i] = open_pose[i]
                         
-                        dex3_right_msg.motor_cmd[jid].q = right_ramped_target[i]
+                        dex3_right_msg.motor_cmd[jid].q = open_pose[i]
                         dex3_right_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_right_msg.motor_cmd[jid].kd = KD_MOVE
                         right_hold_logged[i] = False
@@ -810,16 +809,15 @@ if __name__ == '__main__':
                         logger_mp.info(f"[LEFT TORQUES] {left_tau}")
 
                 else:
-                    # Trigger released - open hand and reset hold states
+                    # Trigger released - open hand instantly (no ramping)
                     with left_hand_override.get_lock():
                         left_hand_override[0] = 0.0
 
                     for i, jid in enumerate(Dex3_1_Left_JointIndex):
-                        # Ramp towards open position
-                        new_ramped = left_ramped_target[i] + (open_pose[i] - left_ramped_target[i]) * RAMP_FACTOR
-                        left_ramped_target[i] = new_ramped
+                        # Direct open - no ramping for faster release
+                        left_ramped_target[i] = open_pose[i]
                         
-                        dex3_left_msg.motor_cmd[jid].q = left_ramped_target[i]
+                        dex3_left_msg.motor_cmd[jid].q = open_pose[i]
                         dex3_left_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_left_msg.motor_cmd[jid].kd = KD_MOVE
                         left_hold_logged[i] = False
