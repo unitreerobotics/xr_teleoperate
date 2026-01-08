@@ -150,32 +150,23 @@ if __name__ == '__main__':
             }
         else:
             # HIVE-INFO: This config is for only a single camera (head)
-            #img_config = {
-            #    'fps': 30,
-            #    'head_camera_type': 'realsense',
-            #    'head_camera_image_shape': [480, 640],  # Head camera resolution
-            #    'head_camera_id_numbers': ["233622072924"], #243722071701
-            #}
-            # HIVE-INFO: Use this config for extra cameras, adjust it accordingly.
-            # img_config = {
-            #     'fps': 30,
-            #     'head_camera_type': 'realsense',
-            #     'head_camera_image_shape': [480, 640],  # Head camera resolution
-            #     'head_camera_id_numbers': ["233622072924"],
-            #     'wrist_camera_type': 'opencv',
-            #     'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
-            #     'wrist_camera_id_numbers': [8,6],
-            # }
-            # HIVE-INFO: Use this config for a single extra camera, adjust it accordingly.
             img_config = {
-                 'fps': 30,
-                 'head_camera_type': 'realsense',
-                 'head_camera_image_shape': [480, 640],  # Head camera resolution
-                 'head_camera_id_numbers': ["233622072924"],
-                 'wrist_camera_type': 'opencv',
-                 'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
-                 'wrist_camera_id_numbers': [6,8],
-             }
+               'fps': 30,
+               'head_camera_type': 'realsense',
+               'head_camera_image_shape': [480, 640],  # Head camera resolution
+               'head_camera_id_numbers': ["233622072924"], #243722071701
+            }
+            # HIVE-INFO: Use this config for extra cameras, adjust it accordingly.
+            img_config = {
+                'fps': 30,
+                'head_camera_type': 'realsense',
+                'head_camera_image_shape': [480, 640],  # Head camera resolution
+                'head_camera_id_numbers': ["233622072924"],
+                'wrist_camera_type': 'opencv',
+                'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+                'wrist_camera_id_numbers': [8,6],
+            }
+
 
         ASPECT_RATIO_THRESHOLD = 2.0 # If the aspect ratio exceeds this value, it is considered binocular
         WRIST_2CAM = False
