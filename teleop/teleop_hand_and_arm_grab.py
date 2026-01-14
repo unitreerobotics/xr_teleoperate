@@ -45,7 +45,7 @@ from unitree_sdk2py.idl.std_msgs.msg.dds_ import String_
 def publish_reset_category(category: int,publisher): # Scene Reset signal
     msg = String_(data=str(category))
     publisher.Write(msg)
-    logger_mp.info(f"published reset category: {category}")
+    # logger_mp.info(f"published reset category: {category}")
 
 # state transition
 START          = False  # Enable to start robot following VR user motion  
@@ -149,23 +149,40 @@ if __name__ == '__main__':
                 'wrist_camera_id_numbers': [2, 4],
             }
         else:
-            # HIVE-INFO: This config is for only a single camera (head)
+            #HIVE-INFO: This config is for only a single camera (head)
             img_config = {
                'fps': 30,
                'head_camera_type': 'realsense',
                'head_camera_image_shape': [480, 640],  # Head camera resolution
                'head_camera_id_numbers': ["233622072924"], #243722071701
             }
+            
             # HIVE-INFO: Use this config for extra cameras, adjust it accordingly.
-            img_config = {
-                'fps': 30,
-                'head_camera_type': 'realsense',
-                'head_camera_image_shape': [480, 640],  # Head camera resolution
-                'head_camera_id_numbers': ["233622072924"],
-                'wrist_camera_type': 'opencv',
-                'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
-                'wrist_camera_id_numbers': [8,6],
-            }
+            # img_config = {
+            #     'fps': 30,
+            #     'head_camera_type': 'realsense',
+            #     'head_camera_image_shape': [480, 640],  # Head camera resolution
+            #     'head_camera_id_numbers': ["233622072924"],
+            #     'wrist_camera_type': 'opencv',
+            #     'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+            #     'wrist_camera_id_numbers': [6, 16],
+            # }
+            
+            # img_config = {
+            #     'fps': 30,
+
+            #     'head_camera_type': 'realsense',
+            #     'head_camera_image_shape': [480, 640],
+            #     'head_camera_id_numbers': ["233622072924"],
+
+            #     # Mixed wrist cameras:
+            #     # - OpenCV uses /dev/video index (int) or "/dev/videoX" (string)
+            #     # - RealSense uses serial number (string)
+            #     'wrist_camera_type': ['opencv', 'opencv', 'realsense'],
+            #     'wrist_camera_image_shape': [480, 640],
+            #     'wrist_camera_id_numbers': [6, 16, "335122271374"],
+            # }
+
 
 
         ASPECT_RATIO_THRESHOLD = 2.0 # If the aspect ratio exceeds this value, it is considered binocular
@@ -332,13 +349,13 @@ if __name__ == '__main__':
             p.cpu_affinity([0,1,2,3]) # Set CPU affinity to cores 0-3
             try:
                 p.nice(-20) # Set highest priority
-                logger_mp.info("Set high priority successfully.")
+                # logger_mp.info("Set high priority successfully.")
             except psutil.AccessDenied:
                 logger_mp.warning("Failed to set high priority. Please run as root.")
                 
             for child in p.children(recursive=True):
                 try:
-                    logger_mp.info(f"Child process {child.pid} name: {child.name()}")
+                    # logger_mp.info(f"Child process {child.pid} name: {child.name()}")
                     child.cpu_affinity([5,6])
                     child.nice(-20)
                 except psutil.AccessDenied:
@@ -408,7 +425,7 @@ if __name__ == '__main__':
             with dual_hand_data_lock:
                 right_ramped_target[:] = np.array(dual_hand_state_array[-7:], dtype=np.float64)
                 left_ramped_target[:] = np.array(dual_hand_state_array[:7], dtype=np.float64)
-            logger_mp.info(f"Initialized ramped targets - Right: {right_ramped_target}, Left: {left_ramped_target}")
+            # logger_mp.info(f"Initialized ramped targets - Right: {right_ramped_target}, Left: {left_ramped_target}")
         
         loop_idx = 0
         while not STOP:
@@ -493,13 +510,13 @@ if __name__ == '__main__':
             # Right hand: detect falling edge (was pressed, now released)
             if right_trigger_prev and not right_trigger:
                 right_trigger_released_time = current_loop_time
-                logger_mp.info("[TARE] Right trigger released, will tare after delay...")
+                # logger_mp.info("[TARE] Right trigger released, will tare after delay...")
             right_trigger_prev = right_trigger
             
             # Left hand: detect falling edge
             if left_trigger_prev and not left_trigger:
                 left_trigger_released_time = current_loop_time
-                logger_mp.info("[TARE] Left trigger released, will tare after delay...")
+                # logger_mp.info("[TARE] Left trigger released, will tare after delay...")
             left_trigger_prev = left_trigger
 
             # --- Read Dex3 state (tau_est + pressure) ---
@@ -552,13 +569,13 @@ if __name__ == '__main__':
                 if right_trigger_released_time is not None:
                     if (current_loop_time - right_trigger_released_time) >= TARE_DELAY:
                         right_press_base = right_press.copy()
-                        logger_mp.info(f"[TARE] Right hand recalibrated! New baseline max: {np.max(right_press_base):.1f}")
+                        # logger_mp.info(f"[TARE] Right hand recalibrated! New baseline max: {np.max(right_press_base):.1f}")
                         right_trigger_released_time = None
                 
                 if left_trigger_released_time is not None:
                     if (current_loop_time - left_trigger_released_time) >= TARE_DELAY:
                         left_press_base = left_press.copy()
-                        logger_mp.info(f"[TARE] Left hand recalibrated! New baseline max: {np.max(left_press_base):.1f}")
+                        # logger_mp.info(f"[TARE] Left hand recalibrated! New baseline max: {np.max(left_press_base):.1f}")
                         left_trigger_released_time = None
 
                 # baseline-correct and normalize (divide by 100.0 like hand_controller.py)
@@ -703,8 +720,8 @@ if __name__ == '__main__':
                     q14[-7:] = right_ramped_target
                     
                     # Print torque values when gripping (every 10 loops ~0.33s at 30Hz)
-                    if loop_idx % 10 == 0:
-                        logger_mp.info(f"[RIGHT TORQUES] {right_tau}")
+                    # if loop_idx % 10 == 0:
+                        # logger_mp.info(f"[RIGHT TORQUES] {right_tau}")
 
                 else:
                     # Trigger released - open hand instantly (no ramping)
@@ -796,8 +813,8 @@ if __name__ == '__main__':
                     q14[:7] = left_ramped_target
                     
                     # Print torque values when gripping (every 10 loops ~0.33s at 30Hz)
-                    if loop_idx % 10 == 0:
-                        logger_mp.info(f"[LEFT TORQUES] {left_tau}")
+                    # if loop_idx % 10 == 0:
+                    #     logger_mp.info(f"[LEFT TORQUES] {left_tau}")
 
                 else:
                     # Trigger released - open hand instantly (no ramping)
@@ -965,7 +982,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         logger_mp.info("KeyboardInterrupt, exiting program...")
     finally:
-        arm_ctrl.ctrl_dual_arm_go_home()
+        #arm_ctrl.ctrl_dual_arm_go_home()
 
         if args.ipc:
             ipc_server.stop()
