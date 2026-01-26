@@ -48,7 +48,12 @@ def main():
     ap.add_argument("--task-dir", required=True, type=str)
     ap.add_argument("--episode", required=True, type=int, help="Input episode index (e.g. 12 -> episode_0012)")
     ap.add_argument("--start", required=True, type=int, help="Start frame index (0-based) in data.json['data']")
-    ap.add_argument("--end", required=True, type=int, help="End frame index (exclusive)")
+    ap.add_argument(
+        "--end",
+        type=int,
+        default=None,
+        help="End frame index (exclusive). If omitted, cuts through the last frame.",
+    )
     ap.add_argument("--out-episode", type=int,
                     help="Output episode index (e.g. 1012 -> episode_1012). "
                          "If omitted, the original episode is replaced.")
@@ -88,7 +93,9 @@ def main():
         raise ValueError("No frames under 'data' in data.json.")
 
     start = max(0, args.start)
-    end = min(len(frames), args.end)
+    # Default to the end of the episode when --end is not provided.
+    end_arg = len(frames) if args.end is None else args.end
+    end = min(len(frames), end_arg)
     if end <= start:
         raise ValueError(f"Invalid range: start={start}, end={end}, len={len(frames)}")
 

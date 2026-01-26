@@ -89,7 +89,7 @@ def get_state() -> dict:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--frequency', type = float, default = 30.0, help = 'save data\'s frequency')
+    parser.add_argument('--frequency', type = float, default = 25.0, help = 'save data\'s frequency')
 
     # basic control parameters
     parser.add_argument('--xr-mode', type=str, choices=['hand', 'controller'], default='hand', help='Select XR device tracking source')
@@ -150,12 +150,12 @@ if __name__ == '__main__':
             }
         else:
             #HIVE-INFO: This config is for only a single camera (head)
-            img_config = {
-               'fps': 30,
-               'head_camera_type': 'realsense',
-               'head_camera_image_shape': [480, 640],  # Head camera resolution
-               'head_camera_id_numbers': ["233622072924"], #243722071701
-            }
+            # img_config = {
+            #    'fps': 30,
+            #    'head_camera_type': 'realsense',
+            #    'head_camera_image_shape': [480, 640],  # Head camera resolution
+            #    'head_camera_id_numbers': ["233622072924"], #243722071701
+            # }
             
             # HIVE-INFO: Use this config for extra cameras, adjust it accordingly.
             # img_config = {
@@ -165,23 +165,23 @@ if __name__ == '__main__':
             #     'head_camera_id_numbers': ["233622072924"],
             #     'wrist_camera_type': 'opencv',
             #     'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
-            #     'wrist_camera_id_numbers': [6, 16],
+            #     'wrist_camera_id_numbers': [6],
             # }
             
-            # img_config = {
-            #     'fps': 30,
+            img_config = {
+                'fps': 30,
 
-            #     'head_camera_type': 'realsense',
-            #     'head_camera_image_shape': [480, 640],
-            #     'head_camera_id_numbers': ["233622072924"],
+                'head_camera_type': 'realsense',
+                'head_camera_image_shape': [480, 640],
+                'head_camera_id_numbers': ["233622072924"],
 
-            #     # Mixed wrist cameras:
-            #     # - OpenCV uses /dev/video index (int) or "/dev/videoX" (string)
-            #     # - RealSense uses serial number (string)
-            #     'wrist_camera_type': ['opencv', 'opencv', 'realsense'],
-            #     'wrist_camera_image_shape': [480, 640],
-            #     'wrist_camera_id_numbers': [6, 16, "335122271374"],
-            # }
+                # Mixed wrist cameras:
+                # - OpenCV uses /dev/video index (int) or "/dev/videoX" (string)
+                # - RealSense uses serial number (string)
+                'wrist_camera_type': ['realsense', 'realsense'],
+                'wrist_camera_image_shape': [480, 640],
+                'wrist_camera_id_numbers': ["323622271193", "335122271374"],
+            }  
 
 
 

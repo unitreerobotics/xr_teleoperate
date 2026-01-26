@@ -132,6 +132,10 @@ class RerunEpisodeLogger:
             f"{self.prefix}left_arm/actions/qpos",
             f"{self.prefix}right_arm/states/qpos",
             f"{self.prefix}right_arm/actions/qpos",
+            f"{self.prefix}left_ee/states/qpos",
+            f"{self.prefix}left_ee/actions/qpos",
+            f"{self.prefix}right_ee/states/qpos",
+            f"{self.prefix}right_ee/actions/qpos",
         ]
 
         for origin in ts_origins:
