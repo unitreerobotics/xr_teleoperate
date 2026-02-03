@@ -101,13 +101,13 @@ def main() -> None:
     ap.add_argument(
         "--brightness",
         type=float,
-        default=10.0,
+        default=30.0,
         help="Max brightness jitter percentage (random in [-val, +val])",
     )
     ap.add_argument(
         "--contrast",
         type=float,
-        default=0.0,
+        default=30.0,
         help="Max contrast jitter percentage (random in [-val, +val])",
     )
     ap.add_argument(
@@ -199,6 +199,7 @@ def main() -> None:
 
         shutil.copytree(ep_path, out_ep)
 
+        b_jitter = rng.uniform(-abs(args.brightness), abs(args.brightness))
         for rel in sorted(color_refs):
             src_file = out_ep / rel
             if not src_file.exists():
@@ -208,7 +209,6 @@ def main() -> None:
             if img is None:
                 eprint(f"WARNING: failed to read image, skipping: {src_file}")
                 continue
-            b_jitter = rng.uniform(-abs(args.brightness), abs(args.brightness))
             c_jitter = rng.uniform(-abs(args.contrast), abs(args.contrast))
             out = apply_brightness_contrast(img, b_jitter, c_jitter)
             if not cv2.imwrite(str(src_file), out):
