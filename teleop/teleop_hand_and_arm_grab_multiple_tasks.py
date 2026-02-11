@@ -649,6 +649,8 @@ if __name__ == '__main__':
         grab_pose_right = np.array([-0.0,-1.0,-1.70,1.55,1.75,1.55,1.75])  # Palmar grip
         grab_pose_left = np.array([0.0,1.0,1.70,-1.55,-1.75,-1.55,-1.75])  # Palmar grip
         open_pose = np.array([0,0,0,0,0,0,0])
+        OPEN_LIMITS_LEFT = np.array([0.00, -0.70, 1.70, 0.00, -1.75, 0.00, -1.75], dtype=float)
+        OPEN_LIMITS_RIGHT = np.array([0.00, 0.70, -1.70, 0.00, 1.75, 0.00, 1.75], dtype=float)
 
         # --- SmartGrip parameters ---
         KP_MOVE = 1.5
@@ -657,11 +659,11 @@ if __name__ == '__main__':
         KD_HOLD = 0.2
 
         # Hysteresis thresholds (matching hand_controller.py)
-        PRESSURE_THRESHOLD = 0.15              # Higher - to ENTER hold
-        PRESSURE_THRESHOLD_BASE = 0.05         # Base sensor threshold (enter)
-        PRESSURE_THRESHOLD_EXIT = 0.10         # Lower - to EXIT hold (sticky)
-        PRESSURE_THRESHOLD_BASE_EXIT = 0.03    # Base sensor threshold (exit)
-        TORQUE_THRESHOLD_HIGH = 250000.0
+        PRESSURE_THRESHOLD = 0.30              # Higher - to ENTER hold
+        PRESSURE_THRESHOLD_BASE = 0.08         # Base sensor threshold (enter)
+        PRESSURE_THRESHOLD_EXIT = 0.25         # Lower - to EXIT hold (sticky)
+        PRESSURE_THRESHOLD_BASE_EXIT = 0.05    # Base sensor threshold (exit)
+        TORQUE_THRESHOLD_HIGH = 600000.0
         
         SQUEEZE_OFFSET = 0.10     # matching hand_controller.py
         RAMP_FACTOR = 0.25        # smooth ramping
@@ -1021,11 +1023,6 @@ if __name__ == '__main__':
                     # Update q14 for recording
                     q14[-7:] = right_ramped_target
                     
-                    # Print torque values when gripping (every 10 loops ~0.33s at 30Hz)
-                    if loop_idx % 10 == 0:
-                        logger_mp.info(f"[RIGHT TORQUES] {right_tau}")
-                        logger_mp.info(f"[LEFT TORQUES] {left_tau}")
-
                 else:
                     # Trigger released - open hand instantly (no ramping)
                     with right_hand_override.get_lock():
@@ -1033,9 +1030,9 @@ if __name__ == '__main__':
 
                     for i, jid in enumerate(Dex3_1_Right_JointIndex):
                         # Direct open - no ramping for faster release
-                        right_ramped_target[i] = open_pose[i]
+                        right_ramped_target[i] = OPEN_LIMITS_RIGHT[i]
                         
-                        dex3_right_msg.motor_cmd[jid].q = open_pose[i]
+                        dex3_right_msg.motor_cmd[jid].q = OPEN_LIMITS_RIGHT[i]
                         dex3_right_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_right_msg.motor_cmd[jid].kd = KD_MOVE
                         right_hold_logged[i] = False
@@ -1156,9 +1153,9 @@ if __name__ == '__main__':
 
                     for i, jid in enumerate(Dex3_1_Left_JointIndex):
                         # Direct open - no ramping for faster release
-                        left_ramped_target[i] = open_pose[i]
+                        left_ramped_target[i] = OPEN_LIMITS_LEFT[i]
                         
-                        dex3_left_msg.motor_cmd[jid].q = open_pose[i]
+                        dex3_left_msg.motor_cmd[jid].q = OPEN_LIMITS_LEFT[i]
                         dex3_left_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_left_msg.motor_cmd[jid].kd = KD_MOVE
                         left_hold_logged[i] = False
