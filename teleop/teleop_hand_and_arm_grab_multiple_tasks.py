@@ -948,18 +948,49 @@ if __name__ == '__main__':
                         should_hold = False
                         
                         # Per-motor pressure check (matching hand_controller.py logic)
+                        hold_reasons = []
                         if i == 1:  # Thumb base
-                            should_hold = (right_thumb_base > thresh_main or right_thumb_tip > thresh_main or is_high_torque)
+                            if right_thumb_base > thresh_main:
+                                hold_reasons.append(f"thumb_base_press={right_thumb_base:.3f}>{thresh_main:.3f}")
+                            if right_thumb_tip > thresh_main:
+                                hold_reasons.append(f"thumb_tip_press={right_thumb_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 2:  # Thumb tip
-                            should_hold = (right_thumb_tip > thresh_main or is_high_torque)
+                            if right_thumb_tip > thresh_main:
+                                hold_reasons.append(f"thumb_tip_press={right_thumb_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 3:  # Middle base (safety link)
-                            should_hold = (right_middle_base > thresh_base or right_middle_tip > thresh_main or is_high_torque)
+                            if right_middle_base > thresh_base:
+                                hold_reasons.append(f"middle_base_press={right_middle_base:.3f}>{thresh_base:.3f}")
+                            if right_middle_tip > thresh_main:
+                                hold_reasons.append(f"middle_tip_press={right_middle_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 4:  # Middle tip
-                            should_hold = (right_middle_tip > thresh_main or is_high_torque)
+                            if right_middle_tip > thresh_main:
+                                hold_reasons.append(f"middle_tip_press={right_middle_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 5:  # Index base (safety link)
-                            should_hold = (right_index_base > thresh_base or right_index_tip > thresh_main or is_high_torque)
+                            if right_index_base > thresh_base:
+                                hold_reasons.append(f"index_base_press={right_index_base:.3f}>{thresh_base:.3f}")
+                            if right_index_tip > thresh_main:
+                                hold_reasons.append(f"index_tip_press={right_index_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 6:  # Index tip
-                            should_hold = (right_index_tip > thresh_main or is_high_torque)
+                            if right_index_tip > thresh_main:
+                                hold_reasons.append(f"index_tip_press={right_index_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         
                         if should_hold:
                             # Enter or maintain hold
@@ -968,7 +999,8 @@ if __name__ == '__main__':
                                 direction = 1.0 if target_pose[i] > current_pos[i] else -1.0
                                 smart_target = current_pos[i] + (SQUEEZE_OFFSET * direction)
                                 right_ramped_target[i] = smart_target
-                                logger_mp.debug(f"[RIGHT] Joint {i} contact! Snapped to {smart_target:.2f}")
+                                finger_names = ["thumb_rot", "thumb_base", "thumb_tip", "middle_base", "middle_tip", "index_base", "index_tip"]
+                                logger_mp.info(f"[RIGHT {finger_names[i]}] HOLDING due to: {', '.join(hold_reasons)}")
                                 right_hold_logged[i] = True
                             
                             # Hold with soft gains
@@ -1042,18 +1074,49 @@ if __name__ == '__main__':
                         should_hold = False
                         
                         # Per-motor pressure check (matching hand_controller.py logic for LEFT)
+                        hold_reasons = []
                         if i == 1:  # Thumb base
-                            should_hold = (left_thumb_base > thresh_main or left_thumb_tip > thresh_main or is_high_torque)
+                            if left_thumb_base > thresh_main:
+                                hold_reasons.append(f"thumb_base_press={left_thumb_base:.3f}>{thresh_main:.3f}")
+                            if left_thumb_tip > thresh_main:
+                                hold_reasons.append(f"thumb_tip_press={left_thumb_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 2:  # Thumb tip
-                            should_hold = (left_thumb_tip > thresh_main or is_high_torque)
+                            if left_thumb_tip > thresh_main:
+                                hold_reasons.append(f"thumb_tip_press={left_thumb_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 3:  # Middle base (safety link)
-                            should_hold = (left_middle_base > thresh_base or left_middle_tip > thresh_main or is_high_torque)
+                            if left_middle_base > thresh_base:
+                                hold_reasons.append(f"middle_base_press={left_middle_base:.3f}>{thresh_base:.3f}")
+                            if left_middle_tip > thresh_main:
+                                hold_reasons.append(f"middle_tip_press={left_middle_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 4:  # Middle tip
-                            should_hold = (left_middle_tip > thresh_main or is_high_torque)
+                            if left_middle_tip > thresh_main:
+                                hold_reasons.append(f"middle_tip_press={left_middle_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 5:  # Index base (safety link)
-                            should_hold = (left_index_base > thresh_base or left_index_tip > thresh_main or is_high_torque)
+                            if left_index_base > thresh_base:
+                                hold_reasons.append(f"index_base_press={left_index_base:.3f}>{thresh_base:.3f}")
+                            if left_index_tip > thresh_main:
+                                hold_reasons.append(f"index_tip_press={left_index_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 6:  # Index tip
-                            should_hold = (left_index_tip > thresh_main or is_high_torque)
+                            if left_index_tip > thresh_main:
+                                hold_reasons.append(f"index_tip_press={left_index_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         
                         if should_hold:
                             # Enter or maintain hold
@@ -1062,7 +1125,8 @@ if __name__ == '__main__':
                                 direction = 1.0 if target_pose[i] > current_pos[i] else -1.0
                                 smart_target = current_pos[i] + (SQUEEZE_OFFSET * direction)
                                 left_ramped_target[i] = smart_target
-                                logger_mp.debug(f"[LEFT] Joint {i} contact! Snapped to {smart_target:.2f}")
+                                finger_names = ["thumb_rot", "thumb_base", "thumb_tip", "middle_base", "middle_tip", "index_base", "index_tip"]
+                                logger_mp.info(f"[LEFT {finger_names[i]}] HOLDING due to: {', '.join(hold_reasons)}")
                                 left_hold_logged[i] = True
                             
                             # Hold with soft gains
