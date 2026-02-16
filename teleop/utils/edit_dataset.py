@@ -29,6 +29,18 @@ def parse_csv_set(s: Optional[str]) -> Set[str]:
         return set()
     return {x.strip() for x in s.split(",") if x.strip()}
 
+def remove_phrase_from_prompt(prompt: str, phrase: str) -> Tuple[str, int]:
+    """
+    Remove a phrase from a prompt (case-insensitive) and normalize whitespace.
+    Returns (new_prompt, num_occurrences_removed).
+    """
+    pat = re.compile(re.escape(phrase), flags=re.IGNORECASE)
+    new_prompt, n = pat.subn("", prompt)
+    # Normalize whitespace and common punctuation spacing artifacts
+    new_prompt = re.sub(r"\s+", " ", new_prompt).strip()
+    new_prompt = re.sub(r"\s+([,.;:!?])", r"\1", new_prompt)
+    return new_prompt, n
+
 def drop_group_in_step(step: Dict[str, Any], group: str) -> None:
     """Empty the joint arrays for a group in both states and actions."""
     for section_key in ("states", "actions"):
@@ -103,6 +115,13 @@ def main() -> None:
         default=None,
         help="String to replace dataset prompt with (for all episodes). If not set, original prompts are kept.",
     )
+
+    # Remove token prompt 
+    ap.add_argument(
+        "--remove_token_prompt",
+        default=None,
+        help="Phrase to remove from each episode prompt (text.goal). Case-insensitive. Prints episode names where phrase is not found.",
+    )
     
     args = ap.parse_args()
 
@@ -117,7 +136,13 @@ def main() -> None:
 
     drop_cameras = parse_csv_set(args.drop_cameras)
     drop_joint_groups = parse_csv_set(args.drop_joint_groups)
-    replace_prompt = parse_csv_set(args.replace_prompt)
+    replace_prompt = args.replace_prompt
+    remove_token_prompt = args.remove_token_prompt
+    if remove_token_prompt is not None:
+        remove_token_prompt = remove_token_prompt.strip()
+        if not remove_token_prompt:
+            eprint("ERROR: --remove_token_prompt cannot be empty/whitespace")
+            sys.exit(2)
 
     dst_parent = Path(args.dst_parent).expanduser().resolve() if args.dst_parent else src.parent
     dst = dst_parent / f"{src.name}{args.suffix}"
@@ -171,9 +196,12 @@ def main() -> None:
     if drop_joint_groups:
         print(f"Drop joint groups: {sorted(drop_joint_groups)}")
     if replace_prompt:
-        print(f"Replace prompt with: {args.replace_prompt}")
+        print(f"Replace prompt with: {replace_prompt}")
+    if remove_token_prompt:
+        print(f"Remove from prompt: {remove_token_prompt}")
     print("")
 
+    token_not_found_eps: List[str] = []
     for ep_idx, ep_path in selected:
         out_ep = dst / ep_path.name
 
@@ -232,7 +260,22 @@ def main() -> None:
                 print(f"Episode {ep_path.name}: Replacing prompt '{rp}' with '{args.replace_prompt}'")
                 dj.setdefault("text", {})["goal"] = args.replace_prompt
 
-        # 4) Collect referenced assets AFTER filtering (so dropped cameras won't be copied)
+        # 4) Remove phrase from prompt if specified
+        if remove_token_prompt:
+            goal = dj.get("text", {}).get("goal")
+            if not isinstance(goal, str):
+                token_not_found_eps.append(ep_path.name)
+            else:
+                new_goal, n = remove_phrase_from_prompt(goal, remove_token_prompt)
+                if n == 0:
+                    token_not_found_eps.append(ep_path.name)
+                else:
+                    print(
+                        f"Episode {ep_path.name}: Removed {n} occurrence(s) of '{remove_token_prompt}' from prompt"
+                    )
+                    dj.setdefault("text", {})["goal"] = new_goal
+
+        # 5) Collect referenced assets AFTER filtering (so dropped cameras won't be copied)
         refs = collect_referenced_files(dj)
 
         if args.dry_run:
@@ -262,6 +305,12 @@ def main() -> None:
                 eprint(f"WARNING: referenced file missing, skipping: {src_file}")
                 continue
             shutil.copy2(src_file, dst_file)
+
+    if remove_token_prompt and token_not_found_eps:
+        print(
+            f"\nremove_token_prompt '{remove_token_prompt}' not found in {len(token_not_found_eps)} episode(s): "
+            + ", ".join(token_not_found_eps)
+        )
 
     if not args.dry_run:
         print("\nDone.")
