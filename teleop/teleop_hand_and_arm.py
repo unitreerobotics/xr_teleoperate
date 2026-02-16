@@ -1,5 +1,6 @@
 import time
 import argparse
+import numpy as np
 from multiprocessing import Value, Array, Lock
 import threading
 import logging_mp
@@ -14,7 +15,16 @@ sys.path.append(parent_dir)
 
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize # dds 
 from televuer import TeleVuerWrapper
-from teleop.robot_control.robot_arm import G1_29_ArmController, G1_23_ArmController, H1_2_ArmController, H1_ArmController
+from teleop.robot_control.robot_arm import (
+    G1_29_ArmController,
+    G1_23_ArmController,
+    H1_2_ArmController,
+    H1_ArmController,
+    G1_29_JointIndex,
+    G1_23_JointIndex,
+    H1_2_JointIndex,
+    H1_JointIndex,
+)
 from teleop.robot_control.robot_arm_ik import G1_29_ArmIK, G1_23_ArmIK, H1_2_ArmIK, H1_ArmIK
 from teleimager.image_client import ImageClient
 from teleop.utils.episode_writer import EpisodeWriter
@@ -70,6 +80,10 @@ def get_state() -> dict:
         "RECORD_RUNNING": RECORD_RUNNING,
     }
 
+def extract_yaw_from_pose(pose_4x4: np.ndarray) -> float:
+    """Extract Z-up yaw angle (radians) from a 4x4 pose matrix."""
+    return float(np.arctan2(pose_4x4[1, 0], pose_4x4[0, 0]))
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # basic control parameters
@@ -80,6 +94,11 @@ if __name__ == '__main__':
     parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'inspire_ftp', 'inspire_dfx', 'brainco'], help='Select end effector controller')
     parser.add_argument('--img-server-ip', type=str, default='192.168.123.164', help='IP address of image server, used by teleimager and televuer')
     parser.add_argument('--network-interface', type=str, default=None, help='Network interface for dds communication, e.g., eth0, wlan0. If None, use default interface.')
+    parser.add_argument('--disable-waist-follow', action='store_true', help='Disable waist yaw follow based on XR head turning.')
+    parser.add_argument('--waist-gain', type=float, default=1.0, help='Gain from XR head yaw delta to waist yaw command.')
+    parser.add_argument('--waist-max-deg', type=float, default=35.0, help='Max absolute waist yaw offset in degrees.')
+    parser.add_argument('--waist-deadband-deg', type=float, default=3.0, help='Deadband for waist yaw offset in degrees.')
+    parser.add_argument('--waist-smoothing', type=float, default=0.2, help='Low-pass factor in [0,1] for waist yaw command.')
     # mode flags
     parser.add_argument('--motion', action = 'store_true', help = 'Enable motion control mode')
     parser.add_argument('--headless', action='store_true', help='Enable headless mode (no display)')
@@ -95,6 +114,9 @@ if __name__ == '__main__':
     parser.add_argument('--task-steps', type = str, default = 'step1: do this; step2: do that;', help = 'task steps for recording at json file')
 
     args = parser.parse_args()
+    args.waist_smoothing = float(np.clip(args.waist_smoothing, 0.0, 1.0))
+    args.waist_max_deg = max(0.0, float(args.waist_max_deg))
+    args.waist_deadband_deg = max(0.0, float(args.waist_deadband_deg))
     logger_mp.info(f"args: {args}")
 
     try:
@@ -156,6 +178,30 @@ if __name__ == '__main__':
         elif args.arm == "H1":
             arm_ik = H1_ArmIK()
             arm_ctrl = H1_ArmController(simulation_mode=args.sim)
+
+        waist_joint_index = None
+        if args.arm == "G1_29":
+            waist_joint_index = G1_29_JointIndex.kWaistYaw
+        elif args.arm == "G1_23":
+            waist_joint_index = G1_23_JointIndex.kWaistYaw
+        elif args.arm == "H1_2":
+            waist_joint_index = H1_2_JointIndex.kWaistYaw
+        elif args.arm == "H1":
+            waist_joint_index = H1_JointIndex.kWaistYaw
+
+        waist_follow_enabled = (not args.disable_waist_follow) and (waist_joint_index is not None)
+        waist_head_yaw_ref = None
+        waist_base_q = 0.0
+        waist_cmd_q = 0.0
+        waist_limit = np.deg2rad(args.waist_max_deg)
+        waist_deadband = np.deg2rad(args.waist_deadband_deg)
+        if waist_follow_enabled:
+            current_motor_q = arm_ctrl.get_current_motor_q()
+            waist_base_q = float(current_motor_q[waist_joint_index])
+            waist_cmd_q = waist_base_q
+            logger_mp.info(f"Waist follow enabled. base={waist_base_q:.3f}rad, max={waist_limit:.3f}rad, deadband={waist_deadband:.3f}rad, gain={args.waist_gain:.2f}")
+        else:
+            logger_mp.info("Waist follow disabled.")
 
         # end-effector
         if args.ee == "dex3":
@@ -288,6 +334,25 @@ if __name__ == '__main__':
 
             # get xr's tele data
             tele_data = tv_wrapper.get_tele_data()
+
+            # waist follow: map XR head yaw turning to robot waist yaw
+            if waist_follow_enabled:
+                head_yaw = extract_yaw_from_pose(tele_data.head_pose)
+                if waist_head_yaw_ref is None:
+                    waist_head_yaw_ref = head_yaw
+
+                yaw_delta = np.arctan2(np.sin(head_yaw - waist_head_yaw_ref), np.cos(head_yaw - waist_head_yaw_ref))
+                waist_offset = np.clip(args.waist_gain * yaw_delta, -waist_limit, waist_limit)
+                if np.abs(waist_offset) < waist_deadband:
+                    waist_offset = 0.0
+
+                waist_target_q = waist_base_q + waist_offset
+                waist_cmd_q = (1.0 - args.waist_smoothing) * waist_cmd_q + args.waist_smoothing * waist_target_q
+                with arm_ctrl.ctrl_lock:
+                    arm_ctrl.msg.motor_cmd[waist_joint_index].q = waist_cmd_q
+                    arm_ctrl.msg.motor_cmd[waist_joint_index].dq = 0.0
+                    arm_ctrl.msg.motor_cmd[waist_joint_index].tau = 0.0
+
             if (args.ee == "dex3" or args.ee == "inspire_dfx" or args.ee == "inspire_ftp" or args.ee == "brainco") and args.input_mode == "hand":
                 with left_hand_pos_array.get_lock():
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()

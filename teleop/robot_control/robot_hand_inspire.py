@@ -241,14 +241,18 @@ class Inspire_Controller_FTP:
         """
         Send scaled angle commands [0-1000] to both hands.
         """
+        if not hasattr(self, "_inspire_hand_default"):
+            import inspire_sdkpy.inspire_hand_defaut as inspire_hand_default
+            self._inspire_hand_default = inspire_hand_default
+
         # Left Hand Command
-        left_cmd_msg = inspire_hand_default.get_inspire_hand_ctrl()
+        left_cmd_msg = self._inspire_hand_default.get_inspire_hand_ctrl()
         left_cmd_msg.angle_set = left_angle_cmd_scaled
         left_cmd_msg.mode = 0b0001 # Mode 1: Angle control
         self.LeftHandCmd_publisher.Write(left_cmd_msg)
 
         # Right Hand Command
-        right_cmd_msg = inspire_hand_default.get_inspire_hand_ctrl()
+        right_cmd_msg = self._inspire_hand_default.get_inspire_hand_ctrl()
         right_cmd_msg.angle_set = right_angle_cmd_scaled
         right_cmd_msg.mode = 0b0001 # Mode 1: Angle control
         self.RightHandCmd_publisher.Write(right_cmd_msg)
@@ -264,6 +268,8 @@ class Inspire_Controller_FTP:
     def control_process(self, left_hand_array, right_hand_array, left_hand_state_array, right_hand_state_array,
                               dual_hand_data_lock = None, dual_hand_state_array = None, dual_hand_action_array = None):
         logger_mp.info("[Inspire_Controller_FTP] Control process started.")
+        import inspire_sdkpy.inspire_hand_defaut as inspire_hand_default
+        self._inspire_hand_default = inspire_hand_default
         self.running = True
 
         left_q_target  = np.full(Inspire_Num_Motors, 1.0)
