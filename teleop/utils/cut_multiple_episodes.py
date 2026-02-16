@@ -16,7 +16,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from teleop.utils.cut_episode import copy_rel_file, load_json, save_json
+from cut_episode import copy_rel_file, load_json, save_json
 
 
 def parse_cuts(raw: str) -> list[tuple[int, int, int]]:
