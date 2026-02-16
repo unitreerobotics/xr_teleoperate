@@ -394,10 +394,10 @@ if __name__ == '__main__':
                 'fps': 30,
                 'head_camera_type': 'opencv',
                 'head_camera_image_shape': [480, 640],  # Head camera resolution
-                'head_camera_id_numbers': [0],
-                'wrist_camera_type': 'opencv',
-                'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
-                'wrist_camera_id_numbers': [2, 4],
+                'head_camera_id_numbers': ['243722071701'],
+                # 'wrist_camera_type': 'opencv',
+                # 'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+                # 'wrist_camera_id_numbers': [2, 4],
             }
         else:
             #HIVE-INFO: This config is for only a single camera (head)
@@ -1002,7 +1002,7 @@ if __name__ == '__main__':
                                 smart_target = current_pos[i] + (SQUEEZE_OFFSET * direction)
                                 right_ramped_target[i] = smart_target
                                 finger_names = ["thumb_rot", "thumb_base", "thumb_tip", "middle_base", "middle_tip", "index_base", "index_tip"]
-                                logger_mp.info(f"[RIGHT {finger_names[i]}] HOLDING due to: {', '.join(hold_reasons)}")
+                                #logger_mp.info(f"[RIGHT {finger_names[i]}] HOLDING due to: {', '.join(hold_reasons)}")
                                 right_hold_logged[i] = True
                             
                             # Hold with soft gains
@@ -1030,9 +1030,9 @@ if __name__ == '__main__':
 
                     for i, jid in enumerate(Dex3_1_Right_JointIndex):
                         # Direct open - no ramping for faster release
-                        right_ramped_target[i] = OPEN_LIMITS_RIGHT[i]
+                        right_ramped_target[i] = open_pose[i]
                         
-                        dex3_right_msg.motor_cmd[jid].q = OPEN_LIMITS_RIGHT[i]
+                        dex3_right_msg.motor_cmd[jid].q = open_pose[i]
                         dex3_right_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_right_msg.motor_cmd[jid].kd = KD_MOVE
                         right_hold_logged[i] = False
@@ -1123,7 +1123,7 @@ if __name__ == '__main__':
                                 smart_target = current_pos[i] + (SQUEEZE_OFFSET * direction)
                                 left_ramped_target[i] = smart_target
                                 finger_names = ["thumb_rot", "thumb_base", "thumb_tip", "middle_base", "middle_tip", "index_base", "index_tip"]
-                                logger_mp.info(f"[LEFT {finger_names[i]}] HOLDING due to: {', '.join(hold_reasons)}")
+                                #logger_mp.info(f"[LEFT {finger_names[i]}] HOLDING due to: {', '.join(hold_reasons)}")
                                 left_hold_logged[i] = True
                             
                             # Hold with soft gains
@@ -1153,9 +1153,9 @@ if __name__ == '__main__':
 
                     for i, jid in enumerate(Dex3_1_Left_JointIndex):
                         # Direct open - no ramping for faster release
-                        left_ramped_target[i] = OPEN_LIMITS_LEFT[i]
+                        left_ramped_target[i] = open_pose[i]
                         
-                        dex3_left_msg.motor_cmd[jid].q = OPEN_LIMITS_LEFT[i]
+                        dex3_left_msg.motor_cmd[jid].q = open_pose[i]
                         dex3_left_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_left_msg.motor_cmd[jid].kd = KD_MOVE
                         left_hold_logged[i] = False
