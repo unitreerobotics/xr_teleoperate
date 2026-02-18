@@ -2,7 +2,8 @@
 """
 Interactive dataset viewer for Rerun.
 
-- Spawns a single Rerun viewer.
+- Spawns a Rerun viewer on the first available port (starting at 9876).
+- If another viewer is already running, this starts a separate instance.
 - Lazily logs the currently selected episode.
 - Use terminal input to switch episodes:
     n = next, p = previous, <number> = jump, q = quit
@@ -26,6 +27,7 @@ import json
 import time
 import argparse
 import re
+import socket
 from pathlib import Path
 from datetime import datetime
 
@@ -105,18 +107,48 @@ class EpisodeReader:
 
 
 class RerunDatasetViewer:
-    def __init__(self, window: int = 60, memory_limit: str | None = None):
+    def __init__(
+        self,
+        window: int = 60,
+        memory_limit: str | None = None,
+        viewer_port: int = 9876,
+        port_scan: int = 64,
+    ):
         self.window = window
 
         rr.init(datetime.now().strftime("DatasetViewer_%Y%m%d_%H%M%S"))
+        self.viewer_port = self._pick_available_port(start_port=viewer_port, max_tries=port_scan)
+
+        spawn_kwargs = {
+            "port": self.viewer_port,
+            "hide_welcome_screen": True,
+        }
         if memory_limit:
-            rr.spawn(memory_limit=memory_limit, hide_welcome_screen=True)
-        else:
-            rr.spawn(hide_welcome_screen=True)
+            spawn_kwargs["memory_limit"] = memory_limit
+        try:
+            rr.spawn(**spawn_kwargs)
+        except TypeError:
+            # Older rerun-sdk versions may not support `port`.
+            spawn_kwargs.pop("port", None)
+            rr.spawn(**spawn_kwargs)
+            self.viewer_port = -1
 
         # Cache: episode_idx -> frames already loaded/logged?
         self._frames_cache: dict[int, list[dict]] = {}
         self._logged_episodes: set[int] = set()
+
+    @staticmethod
+    def _pick_available_port(start_port: int, max_tries: int) -> int:
+        """Find an available localhost TCP port near `start_port`."""
+        for port in range(start_port, start_port + max_tries):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(0.2)
+                if sock.connect_ex(("127.0.0.1", port)) != 0:
+                    return port
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
 
     @staticmethod
     def _ep_prefix(ep: int) -> str:
@@ -244,6 +276,13 @@ def main() -> None:
     parser.add_argument("--start", type=int, default=None, help="Start episode index (e.g. 12)")
     parser.add_argument("--window", type=int, default=60)
     parser.add_argument("--memory-limit", type=str, default=None, help="e.g. 200MB or 1GB")
+    parser.add_argument("--viewer-port", type=int, default=9876, help="Preferred Rerun viewer port")
+    parser.add_argument(
+        "--viewer-port-scan",
+        type=int,
+        default=64,
+        help="How many ports to scan upward if preferred port is busy",
+    )
     parser.add_argument("--playback", choices=["offline", "online"], default="offline")
     parser.add_argument("--hz", type=float, default=30.0)
     args = parser.parse_args()
@@ -262,7 +301,14 @@ def main() -> None:
         cur_idx = 0
 
     reader = EpisodeReader(task_dir=str(task_dir))
-    viewer = RerunDatasetViewer(window=args.window, memory_limit=args.memory_limit)
+    viewer = RerunDatasetViewer(
+        window=args.window,
+        memory_limit=args.memory_limit,
+        viewer_port=args.viewer_port,
+        port_scan=args.viewer_port_scan,
+    )
+    if viewer.viewer_port > 0:
+        print(f"Rerun viewer port: {viewer.viewer_port}")
 
     def show_episode(ep: int) -> None:
         color_keys = viewer.ensure_episode_loaded_and_logged(
