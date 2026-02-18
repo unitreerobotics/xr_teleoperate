@@ -341,6 +341,18 @@ if __name__ == '__main__':
                                   -tele_data.tele_state.left_thumbstick_value[0]  * 0.3,
                                   -tele_data.tele_state.right_thumbstick_value[0] * 0.3)
 
+            # waist yaw control with A and B buttons (for controller mode)
+            if args.xr_mode == "controller":
+                waist_rotation_speed = 0.01  # radians per frame (adjust for slower/faster rotation)
+                if tele_data.tele_state.left_aButton:
+                    # A button (left controller): rotate waist yaw to the right
+                    arm_ctrl.ctrl_waist_yaw(waist_rotation_speed)
+                    logger_mp.debug(f"Waist yaw right: {arm_ctrl.get_waist_yaw_target():.3f}")
+                elif tele_data.tele_state.left_bButton:
+                    # B button (left controller): rotate waist yaw to the left
+                    arm_ctrl.ctrl_waist_yaw(-waist_rotation_speed)
+                    logger_mp.debug(f"Waist yaw left: {arm_ctrl.get_waist_yaw_target():.3f}")
+
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
             current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()

@@ -1,5 +1,8 @@
 import ctypes
 import os
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 # 把你 conda 环境里的新版 libstdc++ 提前塞进进程，全局可见
 # ctypes.CDLL("/opt/miniconda3/envs/xr_tele/lib/libstdc++.so.6", mode=ctypes.RTLD_GLOBAL)
@@ -57,6 +60,242 @@ RECORD_READY   = True   # True if [Ready], False if [Recording] / [AutoSave]
 TASK_NAME = None
 TASK_DESC = None
 ITEM_ID = None
+
+# multi-task selection (local prompts)
+TASKS = []
+TASK_IDX = 0
+TASK_IDX_INPUT = ""
+TASK_IDX_INPUT_LAST_TS = 0.0
+BASE_TASK_NAME = None
+
+def _normalize_task(entry: Any, idx: int) -> Dict[str, Any]:
+    if isinstance(entry, str):
+        prompt = entry.strip()
+        if not prompt:
+            raise ValueError(f"tasks[{idx}] is empty")
+        return {"task_name": f"task_{idx}", "task_desc": prompt}
+    if isinstance(entry, dict):
+        task_name = entry.get("task_name") or entry.get("name") or entry.get("id") or f"task_{idx}"
+        task_desc = (
+            entry.get("task_desc")
+            or entry.get("prompt")
+            or entry.get("goal")
+            or entry.get("text")
+            or entry.get("desc")
+        )
+        if not isinstance(task_desc, str) or not task_desc.strip():
+            raise ValueError(f"tasks[{idx}] missing prompt (expected one of: task_desc/prompt/goal/text/desc)")
+        out = {"task_name": str(task_name), "task_desc": task_desc.strip()}
+        task_long_desc = entry.get("description") or entry.get("task_long_desc")
+        if isinstance(task_long_desc, str) and task_long_desc.strip():
+            out["task_long_desc"] = task_long_desc.strip()
+        task_steps = entry.get("steps")
+        if isinstance(task_steps, str) and task_steps.strip():
+            out["steps"] = task_steps.strip()
+        item_id = entry.get("item_id")
+        if item_id is not None:
+            out["item_id"] = item_id
+        return out
+    raise ValueError(f"tasks[{idx}] must be a string or object, got: {type(entry).__name__}")
+
+def load_tasks(tasks_file: Optional[str], inline_prompts: Optional[List[str]], default_task_name: str, default_task_desc: str) -> List[Dict[str, Any]]:
+    tasks: List[Dict[str, Any]] = []
+
+    if tasks_file:
+        path = Path(tasks_file).expanduser()
+        if not path.exists():
+            raise FileNotFoundError(f"--tasks-file not found: {path}")
+        content = path.read_text(encoding="utf-8")
+        stripped = content.lstrip()
+        is_json_like = stripped.startswith("[") or stripped.startswith("{")
+        if is_json_like:
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                logger_mp.warning(f"--tasks-file looks like JSON but failed to parse; treating as newline prompts: {path}")
+                data = None
+        else:
+            data = None
+
+        if data is not None:
+            if isinstance(data, dict) and "tasks" in data:
+                data = data["tasks"]
+            if not isinstance(data, list):
+                raise ValueError(f"--tasks-file JSON must be a list (or dict with key 'tasks'), got: {type(data).__name__}")
+            for i, entry in enumerate(data):
+                tasks.append(_normalize_task(entry, i))
+        else:
+            lines = [ln.strip() for ln in content.splitlines()]
+            prompts = [ln for ln in lines if ln and not ln.startswith("#")]
+            for i, prompt in enumerate(prompts):
+                tasks.append({"task_name": f"task_{i}", "task_desc": prompt})
+
+    if inline_prompts:
+        for prompt in inline_prompts:
+            if not isinstance(prompt, str) or not prompt.strip():
+                continue
+            tasks.append({"task_name": f"task_{len(tasks)}", "task_desc": prompt.strip()})
+
+    if not tasks:
+        tasks = [{"task_name": default_task_name, "task_desc": default_task_desc}]
+
+    return tasks
+
+def get_selected_task() -> Dict[str, Any]:
+    global TASKS, TASK_IDX
+    if not TASKS:
+        return {"task_name": "task_0", "task_desc": ""}
+    return TASKS[TASK_IDX % len(TASKS)]
+
+def set_task_idx(new_idx: int) -> None:
+    global TASK_IDX, TASKS, TASK_IDX_INPUT, TASK_IDX_INPUT_LAST_TS
+    if not TASKS:
+        return
+    TASK_IDX = int(new_idx) % len(TASKS)
+    TASK_IDX_INPUT = ""
+    TASK_IDX_INPUT_LAST_TS = 0.0
+    task = get_selected_task()
+    logger_mp.info(f"[task] selected idx={TASK_IDX} name={task.get('task_name')} prompt={task.get('task_desc')}")
+
+def shift_task_idx(delta: int) -> None:
+    global TASKS
+    if not TASKS:
+        return
+    set_task_idx(TASK_IDX + int(delta))
+
+def apply_task_to_recorder(recorder: EpisodeWriter, task: Dict[str, Any], task_idx: int, base_task_name: str) -> None:
+    # Keep EpisodeWriter schema compatible while storing extra metadata.
+    recorder.text["goal"] = task.get("task_desc", "")
+    if "task_long_desc" in task:
+        recorder.text["desc"] = task.get("task_long_desc", "")
+    if "steps" in task:
+        recorder.text["steps"] = task.get("steps", "")
+    recorder.text["task_name"] = base_task_name
+    # prompt/task variant selection
+    recorder.text["prompt_idx"] = int(task_idx)
+    recorder.text["task_idx"] = int(task_idx)
+    if "item_id" in task:
+        recorder.text["item_id"] = task.get("item_id")
+
+def _handle_task_selection_key(key: str) -> bool:
+    global TASK_IDX_INPUT, TASK_IDX_INPUT_LAST_TS, RECORD_RUNNING
+
+    is_task_key = key in ("left", "right", "up", "down", "[", "]", "esc", "escape", "backspace", "enter") or (
+        len(key) == 1 and key.isdigit()
+    )
+    if not is_task_key:
+        return False
+    if RECORD_RUNNING:
+        # Ignore task switching while recording, but don't warn.
+        return True
+
+    if key in ("left", "up", "["):
+        shift_task_idx(-1)
+        return True
+    if key in ("right", "down", "]"):
+        shift_task_idx(1)
+        return True
+
+    if key in ("esc", "escape"):
+        TASK_IDX_INPUT = ""
+        TASK_IDX_INPUT_LAST_TS = 0.0
+        return True
+    if key in ("backspace",):
+        if TASK_IDX_INPUT:
+            TASK_IDX_INPUT = TASK_IDX_INPUT[:-1]
+            TASK_IDX_INPUT_LAST_TS = time.time()
+        return True
+    if key in ("enter",):
+        if TASK_IDX_INPUT:
+            try:
+                set_task_idx(int(TASK_IDX_INPUT))
+            except Exception:
+                logger_mp.warning(f"[task] invalid index input: {TASK_IDX_INPUT}")
+            finally:
+                TASK_IDX_INPUT = ""
+                TASK_IDX_INPUT_LAST_TS = 0.0
+        return True
+
+    if len(key) == 1 and key.isdigit():
+        if len(TASKS) <= 10:
+            set_task_idx(int(key))
+        else:
+            TASK_IDX_INPUT += key
+            TASK_IDX_INPUT_LAST_TS = time.time()
+        return True
+
+    return False
+
+def cv2_keycode_to_key(key_code: int) -> Optional[str]:
+    if key_code is None or key_code < 0 or key_code == 255:
+        return None
+
+    # Common special keys
+    if key_code in (10, 13):
+        return "enter"
+    if key_code in (8,):
+        return "backspace"
+    if key_code in (27,):
+        return "esc"
+
+    # Arrow keys (cv2.waitKeyEx codes vary by platform/backend)
+    arrow_map = {
+        81: "left",
+        82: "up",
+        83: "right",
+        84: "down",
+        2424832: "left",
+        2490368: "up",
+        2555904: "right",
+        2621440: "down",
+        65361: "left",
+        65362: "up",
+        65363: "right",
+        65364: "down",
+        63234: "left",
+        63232: "up",
+        63235: "right",
+        63233: "down",
+    }
+    if key_code in arrow_map:
+        return arrow_map[key_code]
+
+    # Regular ASCII keys
+    if 0 <= key_code < 256:
+        try:
+            ch = chr(key_code)
+        except Exception:
+            return None
+        return ch
+
+    return None
+
+def draw_task_overlay(img: np.ndarray) -> None:
+    if not TASKS:
+        return
+    task = get_selected_task()
+    total = len(TASKS)
+
+    prompt = str(task.get("task_desc", ""))
+    if len(prompt) > 90:
+        prompt = prompt[:87] + "..."
+
+    base_name = BASE_TASK_NAME or ""
+    lines = [
+        f"Task: {base_name}  Prompt [{TASK_IDX}/{total-1}]",
+        prompt,
+    ]
+    if TASK_IDX_INPUT:
+        lines.append(f"Index: {TASK_IDX_INPUT} (Enter to select)")
+    else:
+        lines.append("Arrows: prev/next | 0-9: select | Enter: multi-digit")
+
+    x, y = 10, 18
+    for line in lines:
+        cv2.putText(img, line, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, line, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+        y += 18
+
 def on_press(key):
     global STOP, START, RECORD_TOGGLE
     if key == 'r':
@@ -66,6 +305,8 @@ def on_press(key):
         STOP = True
     elif key == 's' and START == True:
         RECORD_TOGGLE = True
+    elif _handle_task_selection_key(key):
+        pass
     else:
         logger_mp.warning(f"[on_press] {key} was pressed, but no action is defined for this key.")
 
@@ -104,9 +345,12 @@ if __name__ == '__main__':
     parser.add_argument('--ipc', action = 'store_true', help = 'Enable IPC server to handle input; otherwise enable sshkeyboard')
     parser.add_argument('--record', action = 'store_true', help = 'Enable data recording')
     parser.add_argument('--record-side', type=str, choices=['left', 'right', 'both'], default='both', help='Select which side(s) to record')
-    parser.add_argument('--task-dir', type = str, default = './utils/data/', help = 'path to save data')
+    parser.add_argument('--task-dir', type = str, default = '/mnt/sata1/xr_teleoperate_datasets/', help = 'path to save data')
     parser.add_argument('--task-name', type = str, default = 'pick cube', help = 'task name for recording')
     parser.add_argument('--task-desc', type = str, default = 'e.g. pick the red cube on the table.', help = 'task goal for recording')
+    parser.add_argument('--tasks-file', type=str, default=None, help='Path to tasks file (JSON list / TXT one-prompt-per-line).')
+    parser.add_argument('--tasks', type=str, nargs='*', default=None, help='Inline task prompts (each quoted). Overrides --task-desc.')
+    parser.add_argument('--task-idx', type=int, default=0, help='Initial selected task index (0-based).')
 
     args = parser.parse_args()
     logger_mp.info(f"args: {args}")
@@ -128,6 +372,13 @@ if __name__ == '__main__':
                     filtered_actions[key] = value
             return filtered_states, filtered_actions
 
+        # multi-task prompts
+        TASKS = load_tasks(args.tasks_file, args.tasks, args.task_name, args.task_desc)
+        BASE_TASK_NAME = args.task_name
+        set_task_idx(args.task_idx)
+        if len(TASKS) > 1:
+            logger_mp.info("Task selection: use arrow keys (←/→/↑/↓) or index (0-9 / enter for multi-digit) before starting each episode.")
+
         # ipc communication. client usage: see utils/ipc.py
         if args.ipc:
             ipc_server = IPC_Server(on_press=on_press, on_info=on_info, get_state=get_state)
@@ -143,10 +394,10 @@ if __name__ == '__main__':
                 'fps': 30,
                 'head_camera_type': 'opencv',
                 'head_camera_image_shape': [480, 640],  # Head camera resolution
-                'head_camera_id_numbers': [0],
-                'wrist_camera_type': 'opencv',
-                'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
-                'wrist_camera_id_numbers': [2, 4],
+                'head_camera_id_numbers': ['243722071701'],
+                # 'wrist_camera_type': 'opencv',
+                # 'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+                # 'wrist_camera_id_numbers': [2, 4],
             }
         else:
             #HIVE-INFO: This config is for only a single camera (head)
@@ -178,9 +429,9 @@ if __name__ == '__main__':
                 # Mixed wrist cameras:
                 # - OpenCV uses /dev/video index (int) or "/dev/videoX" (string)
                 # - RealSense uses serial number (string)
-                # 'wrist_camera_type': ['realsense', 'realsense'],
-                # 'wrist_camera_image_shape': [480, 640],
-                # 'wrist_camera_id_numbers': ["323622271193", "335122271374"],
+                'wrist_camera_type': ['realsense', 'realsense'],
+                'wrist_camera_image_shape': [480, 640],
+                'wrist_camera_id_numbers': ["323622271193", "335122271374"],
             }  
 
 
@@ -376,11 +627,16 @@ if __name__ == '__main__':
             sport_client.Init()
 
         # record + headless mode
-        if args.record and args.headless:
-            recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = False)
-        elif args.record and not args.headless:
-            recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = True)
         if args.record:
+            record_task_dir = os.path.join(args.task_dir, args.task_name)
+            initial_task = get_selected_task()
+            recorder = EpisodeWriter(
+                task_dir=record_task_dir,
+                task_goal=initial_task.get("task_desc", args.task_desc),
+                frequency=args.frequency,
+                rerun_log=not args.headless,
+            )
+            apply_task_to_recorder(recorder, initial_task, TASK_IDX, args.task_name)
             logger_mp.info(f"Recording side: {args.record_side}")
 
 
@@ -393,6 +649,8 @@ if __name__ == '__main__':
         grab_pose_right = np.array([-0.0,-1.0,-1.70,1.55,1.75,1.55,1.75])  # Palmar grip
         grab_pose_left = np.array([0.0,1.0,1.70,-1.55,-1.75,-1.55,-1.75])  # Palmar grip
         open_pose = np.array([0,0,0,0,0,0,0])
+        OPEN_LIMITS_LEFT = np.array([0.00, -0.70, 1.70, 0.00, -1.75, 0.00, -1.75], dtype=float)
+        OPEN_LIMITS_RIGHT = np.array([0.00, 0.70, -1.70, 0.00, 1.75, 0.00, 1.75], dtype=float)
 
         # --- SmartGrip parameters ---
         KP_MOVE = 1.5
@@ -401,14 +659,14 @@ if __name__ == '__main__':
         KD_HOLD = 0.2
 
         # Hysteresis thresholds (matching hand_controller.py)
-        PRESSURE_THRESHOLD = 0.20              # Higher - to ENTER hold
-        PRESSURE_THRESHOLD_BASE = 0.05         # Base sensor threshold (enter)
-        PRESSURE_THRESHOLD_EXIT = 0.15         # Lower - to EXIT hold (sticky)
-        PRESSURE_THRESHOLD_BASE_EXIT = 0.03    # Base sensor threshold (exit)
-        TORQUE_THRESHOLD_HIGH = 200000.0
+        PRESSURE_THRESHOLD = 0.30              # Higher - to ENTER hold
+        PRESSURE_THRESHOLD_BASE = 0.08         # Base sensor threshold (enter)
+        PRESSURE_THRESHOLD_EXIT = 0.25         # Lower - to EXIT hold (sticky)
+        PRESSURE_THRESHOLD_BASE_EXIT = 0.05    # Base sensor threshold (exit)
+        TORQUE_THRESHOLD_HIGH = 600000.0
         
-        SQUEEZE_OFFSET = 0.08     # matching hand_controller.py
-        RAMP_FACTOR = 0.20        # smooth ramping
+        SQUEEZE_OFFSET = 0.10     # matching hand_controller.py
+        RAMP_FACTOR = 0.25        # smooth ramping
         THUMB_COMPLETION_THRESHOLD = 0.05
         
         # --- Tare (recalibration) tracking ---
@@ -433,25 +691,39 @@ if __name__ == '__main__':
 
             if not args.headless:
                 tv_resized_image = cv2.resize(tv_img_array, (tv_img_shape[1] // 2, tv_img_shape[0] // 2))
+                draw_task_overlay(tv_resized_image)
                 cv2.imshow("record image", tv_resized_image)
                 # opencv GUI communication
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    START = False
-                    STOP = True
-                    if args.sim:
-                        publish_reset_category(2, reset_pose_publisher)
-                elif key == ord('s'):
-                    RECORD_TOGGLE = True
-                elif key == ord('a'):
-                    if args.sim:
-                        publish_reset_category(2, reset_pose_publisher)
+                wait_fn = getattr(cv2, "waitKeyEx", cv2.waitKey)
+                key_code = wait_fn(1)
+                key = cv2_keycode_to_key(key_code)
+                if key:
+                    if key == 'a':
+                        if args.sim:
+                            publish_reset_category(2, reset_pose_publisher)
+                    else:
+                        on_press(key)
+                        if key == 'q' and args.sim:
+                            publish_reset_category(2, reset_pose_publisher)
 
             if args.record and RECORD_TOGGLE:
                 RECORD_TOGGLE = False
                 if not RECORD_RUNNING:
+                    # Apply the currently selected task prompt to the next episode.
+                    task = get_selected_task()
+                    task_idx = TASK_IDX
+                    if TASK_DESC is not None:
+                        task = {
+                            "task_name": TASK_NAME or task.get("task_name", f"task_{task_idx}"),
+                            "task_desc": TASK_DESC,
+                        }
+                    if ITEM_ID is not None:
+                        task["item_id"] = ITEM_ID
+                    apply_task_to_recorder(recorder, task, task_idx, args.task_name)
                     if recorder.create_episode():
                         RECORD_RUNNING = True
+                        if TASK_DESC is not None:
+                            TASK_NAME, TASK_DESC, ITEM_ID = None, None, None
                     else:
                         logger_mp.error("Failed to create episode. Recording not started.")
                 else:
@@ -490,7 +762,7 @@ if __name__ == '__main__':
                                   -tele_data.tele_state.left_thumbstick_value[0]  * 0.3,
                                   -tele_data.tele_state.right_thumbstick_value[0] * 0.3)
 
-            # waist yaw control with left A and B buttons (for controller mode)
+            # waist yaw control with A and B buttons (for controller mode)
             if args.xr_mode == "controller":
                 waist_rotation_speed = 0.01  # radians per frame (adjust for slower/faster rotation)
                 if tele_data.tele_state.left_aButton:
@@ -690,18 +962,49 @@ if __name__ == '__main__':
                         should_hold = False
                         
                         # Per-motor pressure check (matching hand_controller.py logic)
+                        hold_reasons = []
                         if i == 1:  # Thumb base
-                            should_hold = (right_thumb_base > thresh_main or right_thumb_tip > thresh_main or is_high_torque)
+                            if right_thumb_base > thresh_main:
+                                hold_reasons.append(f"thumb_base_press={right_thumb_base:.3f}>{thresh_main:.3f}")
+                            if right_thumb_tip > thresh_main:
+                                hold_reasons.append(f"thumb_tip_press={right_thumb_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 2:  # Thumb tip
-                            should_hold = (right_thumb_tip > thresh_main or is_high_torque)
+                            if right_thumb_tip > thresh_main:
+                                hold_reasons.append(f"thumb_tip_press={right_thumb_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 3:  # Middle base (safety link)
-                            should_hold = (right_middle_base > thresh_base or right_middle_tip > thresh_main or is_high_torque)
+                            if right_middle_base > thresh_base:
+                                hold_reasons.append(f"middle_base_press={right_middle_base:.3f}>{thresh_base:.3f}")
+                            if right_middle_tip > thresh_main:
+                                hold_reasons.append(f"middle_tip_press={right_middle_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 4:  # Middle tip
-                            should_hold = (right_middle_tip > thresh_main or is_high_torque)
+                            if right_middle_tip > thresh_main:
+                                hold_reasons.append(f"middle_tip_press={right_middle_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 5:  # Index base (safety link)
-                            should_hold = (right_index_base > thresh_base or right_index_tip > thresh_main or is_high_torque)
+                            if right_index_base > thresh_base:
+                                hold_reasons.append(f"index_base_press={right_index_base:.3f}>{thresh_base:.3f}")
+                            if right_index_tip > thresh_main:
+                                hold_reasons.append(f"index_tip_press={right_index_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 6:  # Index tip
-                            should_hold = (right_index_tip > thresh_main or is_high_torque)
+                            if right_index_tip > thresh_main:
+                                hold_reasons.append(f"index_tip_press={right_index_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(right_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         
                         if should_hold:
                             # Enter or maintain hold
@@ -710,7 +1013,8 @@ if __name__ == '__main__':
                                 direction = 1.0 if target_pose[i] > current_pos[i] else -1.0
                                 smart_target = current_pos[i] + (SQUEEZE_OFFSET * direction)
                                 right_ramped_target[i] = smart_target
-                                logger_mp.debug(f"[RIGHT] Joint {i} contact! Snapped to {smart_target:.2f}")
+                                finger_names = ["thumb_rot", "thumb_base", "thumb_tip", "middle_base", "middle_tip", "index_base", "index_tip"]
+                                #logger_mp.info(f"[RIGHT {finger_names[i]}] HOLDING due to: {', '.join(hold_reasons)}")
                                 right_hold_logged[i] = True
                             
                             # Hold with soft gains
@@ -731,10 +1035,6 @@ if __name__ == '__main__':
                     # Update q14 for recording
                     q14[-7:] = right_ramped_target
                     
-                    # Print torque values when gripping (every 10 loops ~0.33s at 30Hz)
-                    # if loop_idx % 10 == 0:
-                        # logger_mp.info(f"[RIGHT TORQUES] {right_tau}")
-
                 else:
                     # Trigger released - open hand instantly (no ramping)
                     with right_hand_override.get_lock():
@@ -783,18 +1083,49 @@ if __name__ == '__main__':
                         should_hold = False
                         
                         # Per-motor pressure check (matching hand_controller.py logic for LEFT)
+                        hold_reasons = []
                         if i == 1:  # Thumb base
-                            should_hold = (left_thumb_base > thresh_main or left_thumb_tip > thresh_main or is_high_torque)
+                            if left_thumb_base > thresh_main:
+                                hold_reasons.append(f"thumb_base_press={left_thumb_base:.3f}>{thresh_main:.3f}")
+                            if left_thumb_tip > thresh_main:
+                                hold_reasons.append(f"thumb_tip_press={left_thumb_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 2:  # Thumb tip
-                            should_hold = (left_thumb_tip > thresh_main or is_high_torque)
+                            if left_thumb_tip > thresh_main:
+                                hold_reasons.append(f"thumb_tip_press={left_thumb_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 3:  # Middle base (safety link)
-                            should_hold = (left_middle_base > thresh_base or left_middle_tip > thresh_main or is_high_torque)
+                            if left_middle_base > thresh_base:
+                                hold_reasons.append(f"middle_base_press={left_middle_base:.3f}>{thresh_base:.3f}")
+                            if left_middle_tip > thresh_main:
+                                hold_reasons.append(f"middle_tip_press={left_middle_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 4:  # Middle tip
-                            should_hold = (left_middle_tip > thresh_main or is_high_torque)
+                            if left_middle_tip > thresh_main:
+                                hold_reasons.append(f"middle_tip_press={left_middle_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 5:  # Index base (safety link)
-                            should_hold = (left_index_base > thresh_base or left_index_tip > thresh_main or is_high_torque)
+                            if left_index_base > thresh_base:
+                                hold_reasons.append(f"index_base_press={left_index_base:.3f}>{thresh_base:.3f}")
+                            if left_index_tip > thresh_main:
+                                hold_reasons.append(f"index_tip_press={left_index_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         elif i == 6:  # Index tip
-                            should_hold = (left_index_tip > thresh_main or is_high_torque)
+                            if left_index_tip > thresh_main:
+                                hold_reasons.append(f"index_tip_press={left_index_tip:.3f}>{thresh_main:.3f}")
+                            if is_high_torque:
+                                hold_reasons.append(f"torque={abs(left_tau[i]):.1f}>{TORQUE_THRESHOLD_HIGH:.1f}")
+                            should_hold = len(hold_reasons) > 0
                         
                         if should_hold:
                             # Enter or maintain hold
@@ -803,7 +1134,8 @@ if __name__ == '__main__':
                                 direction = 1.0 if target_pose[i] > current_pos[i] else -1.0
                                 smart_target = current_pos[i] + (SQUEEZE_OFFSET * direction)
                                 left_ramped_target[i] = smart_target
-                                logger_mp.debug(f"[LEFT] Joint {i} contact! Snapped to {smart_target:.2f}")
+                                finger_names = ["thumb_rot", "thumb_base", "thumb_tip", "middle_base", "middle_tip", "index_base", "index_tip"]
+                                #logger_mp.info(f"[LEFT {finger_names[i]}] HOLDING due to: {', '.join(hold_reasons)}")
                                 left_hold_logged[i] = True
                             
                             # Hold with soft gains
@@ -824,9 +1156,7 @@ if __name__ == '__main__':
                     # Update q14 for recording
                     q14[:7] = left_ramped_target
                     
-                    # Print torque values when gripping (every 10 loops ~0.33s at 30Hz)
-                    # if loop_idx % 10 == 0:
-                    #     logger_mp.info(f"[LEFT TORQUES] {left_tau}")
+                    
 
                 else:
                     # Trigger released - open hand instantly (no ramping)
@@ -996,21 +1326,41 @@ if __name__ == '__main__':
     finally:
         #arm_ctrl.ctrl_dual_arm_go_home()
 
-        if args.ipc:
-            ipc_server.stop()
-        else:
-            stop_listening()
-            listen_keyboard_thread.join()
+        try:
+            if args.ipc:
+                if "ipc_server" in locals():
+                    ipc_server.stop()
+            else:
+                stop_listening()
+                if "listen_keyboard_thread" in locals():
+                    listen_keyboard_thread.join()
+        except Exception:
+            pass
 
-        if args.sim:
-            sim_state_subscriber.stop_subscribe()
-        tv_img_shm.close()
-        tv_img_shm.unlink()
-        if WRIST:
-            wrist_img_shm.close()
-            wrist_img_shm.unlink()
+        try:
+            if args.sim and "sim_state_subscriber" in locals():
+                sim_state_subscriber.stop_subscribe()
+        except Exception:
+            pass
 
-        if args.record:
-            recorder.close()
+        try:
+            if "tv_img_shm" in locals():
+                tv_img_shm.close()
+                tv_img_shm.unlink()
+        except Exception:
+            pass
+
+        try:
+            if "WRIST" in locals() and WRIST and "wrist_img_shm" in locals():
+                wrist_img_shm.close()
+                wrist_img_shm.unlink()
+        except Exception:
+            pass
+
+        try:
+            if args.record and "recorder" in locals():
+                recorder.close()
+        except Exception:
+            pass
         logger_mp.info("Finally, exiting program.")
         exit(0)
