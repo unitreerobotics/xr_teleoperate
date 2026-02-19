@@ -337,6 +337,7 @@ if __name__ == '__main__':
     parser.add_argument('--arm', type=str, choices=['G1_29', 'G1_23', 'H1_2', 'H1'], default='G1_29', help='Select arm controller')
     parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'inspire1', 'brainco', 'fake_dex'], help='Select end effector controller')
     parser.add_argument('--iface', type=str, default='enx98fc84ec937b', help='Network interface for DDS (ignored in simulation mode)')
+    parser.add_argument('--port', type=int, default=8012, help='Vuer server port (default: 8012)')
     # mode flags
     parser.add_argument('--motion', action = 'store_true', help = 'Enable motion control mode')
     parser.add_argument('--headless', action='store_true', help='Enable headless mode (no display)')
@@ -487,7 +488,7 @@ if __name__ == '__main__':
 
         # television: obtain hand pose data from the XR device and transmit the robot's head camera image to the XR device.
         tv_wrapper = TeleVuerWrapper(binocular=BINOCULAR, use_hand_tracking=args.xr_mode == "hand", img_shape=tv_img_shape, img_shm_name=tv_img_shm.name, 
-                                     return_state_data=True, return_hand_rot_data = False)
+                                     return_state_data=True, return_hand_rot_data = False, port=args.port)
         
         
 
