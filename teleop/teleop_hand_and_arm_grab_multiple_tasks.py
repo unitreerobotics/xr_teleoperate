@@ -496,6 +496,8 @@ if __name__ == '__main__':
         if args.arm == "G1_29":
             arm_ik = G1_29_ArmIK()
             arm_ctrl = G1_29_ArmController(motion_mode=args.motion, simulation_mode=args.sim, dds_interface=args.iface)
+            from teleop.robot_control.robot_arm import G1_29_JointIndex
+            WAIST_INDICES = [G1_29_JointIndex.kWaistYaw]  # Only record yaw (what we actually control)
         elif args.arm == "G1_23":
             arm_ik = G1_23_ArmIK()
             arm_ctrl = G1_23_ArmController(motion_mode=args.motion, simulation_mode=args.sim, dds_interface=args.iface)
@@ -682,6 +684,11 @@ if __name__ == '__main__':
             right_ramped_target[:] = grab_pose_right
             left_ramped_target[:] = grab_pose_left
         
+        # Navigation velocity tracking (for recording)
+        nav_vx = 0.0
+        nav_vy = 0.0
+        nav_vyaw = 0.0
+        
         loop_idx = 0
         while not STOP:
             start_time = time.time()
@@ -737,11 +744,6 @@ if __name__ == '__main__':
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
                 with right_hand_pos_array.get_lock():
                     right_hand_pos_array[:] = tele_data.right_hand_pos.flatten()
-            # elif args.ee == "dex3"  and args.xr_mode == "controller":
-            #     with left_hand_pos_array.get_lock():
-            #         left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
-            #     with right_hand_pos_array.get_lock():
-            #         right_hand_pos_array[:] = tele_data.right_hand_pos.flatten()
             else:
                 pass        
             
@@ -754,10 +756,16 @@ if __name__ == '__main__':
                 # command robot to enter damping mode. soft emergency stop function
                 if tele_data.tele_state.left_thumbstick_state and tele_data.tele_state.right_thumbstick_state:
                     sport_client.Damp()
-                # control, limit velocity to within 0.3
-                sport_client.Move(-tele_data.tele_state.left_thumbstick_value[1]  * 0.3,
-                                  -tele_data.tele_state.left_thumbstick_value[0]  * 0.3,
-                                  -tele_data.tele_state.right_thumbstick_value[0] * 0.3)
+                    nav_vx, nav_vy, nav_vyaw = 0.0, 0.0, 0.0
+                else:
+                    # control, limit velocity to within 0.3
+                    nav_vx = -tele_data.tele_state.left_thumbstick_value[1]  * 0.3
+                    nav_vy = -tele_data.tele_state.left_thumbstick_value[0]  * 0.3
+                    nav_vyaw = -tele_data.tele_state.right_thumbstick_value[0] * 0.3
+                    sport_client.Move(nav_vx, nav_vy, nav_vyaw)
+            else:
+                # No motion control - velocities are zero
+                nav_vx, nav_vy, nav_vyaw = 0.0, 0.0, 0.0
 
             # waist yaw control with A and B buttons (for controller mode)
             if args.xr_mode == "controller":
@@ -774,6 +782,7 @@ if __name__ == '__main__':
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
             current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
+            current_full_motor_q = arm_ctrl.get_current_motor_q()  # For waist data
 
             # solve ik using motor data and wrist pose, then use ik results to control arms.
             time_ik_start = time.time()
@@ -1190,45 +1199,23 @@ if __name__ == '__main__':
             # record data
             if args.record:
                 RECORD_READY = recorder.is_ready()
-                # dex hand or gripper
-                # if args.ee == "dex3" and args.xr_mode == "hand":
-                #     with dual_hand_data_lock:
-                #         left_ee_state = dual_hand_state_array[:7]
-                #         right_ee_state = dual_hand_state_array[-7:]
-                #         left_hand_action = dual_hand_action_array[:7]
-                #         right_hand_action = dual_hand_action_array[-7:]
-                #         current_body_state = []
-                #         current_body_action = []
-                # if args.ee == "dex3" and args.xr_mode == "controller":
-                #     with dual_hand_data_lock:
-                #         left_ee_state = dual_hand_state_array[:7]
-                #         right_ee_state = dual_hand_state_array[-7:]
-                #         left_hand_action = dual_hand_action_array[:7]
-                #         right_hand_action = dual_hand_action_array[-7:]
-                #         current_body_state = []
-                #         current_body_action = []
-                # elif (args.ee == "inspire1" or args.ee == "brainco") and args.xr_mode == "hand":
-                #     with dual_hand_data_lock:
-                #         left_ee_state = dual_hand_state_array[:6]
-                #         right_ee_state = dual_hand_state_array[-6:]
-                #         left_hand_action = dual_hand_action_array[:6]
-                #         right_hand_action = dual_hand_action_array[-6:]
-                #         current_body_state = []
-                #         current_body_action = []
-                # else:
-                #     left_ee_state = []
-                #     right_ee_state = []
-                #     left_hand_action = []
-                #     right_hand_action = []
-                #     current_body_state = []
-                #     current_body_action = []
                 with dual_hand_data_lock:
                     left_ee_state = dual_hand_state_array[:7]
                     right_ee_state = dual_hand_state_array[-7:]
                     left_hand_action = dual_hand_action_array[:7]
                     right_hand_action = dual_hand_action_array[-7:]
+                # waist/body state and action (only yaw - what we actually control)
+                if WAIST_INDICES:
+                    current_body_state = [float(current_full_motor_q[WAIST_INDICES[0]])]
+                    waist_yaw_target = arm_ctrl.get_waist_yaw_target()
+                    if waist_yaw_target is not None:
+                        current_body_action = [waist_yaw_target]
+                    else:
+                        current_body_action = current_body_state.copy()
+                else:
                     current_body_state = []
                     current_body_action = []
+        
                 # head image
                 current_tv_image = tv_img_array.copy()
                 # wrist image
@@ -1283,6 +1270,7 @@ if __name__ == '__main__':
                         }, 
                         "body": {
                             "qpos": current_body_state,
+                            "qvel": [], 
                         }, 
                     }
                     actions = {
@@ -1308,6 +1296,7 @@ if __name__ == '__main__':
                         }, 
                         "body": {
                             "qpos": current_body_action,
+                            "qvel": [nav_vx, nav_vy, nav_vyaw],  # Navigation velocity command
                         }, 
                     }
                     states, actions = filter_states_actions_by_side(states, actions, args.record_side)

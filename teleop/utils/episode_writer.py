@@ -68,11 +68,15 @@ class EpisodeWriter():
                 "depth": {"width":self.image_size[0], "height":self.image_size[1], "fps":self.frequency},
                 "audio": {"sample_rate": 16000, "channels": 1, "format":"PCM", "bits":16},    # PCM_S16
                 "joint_names":{
-                    "left_arm":   ['kLeftShoulderPitch' ,'kLeftShoulderRoll', 'kLeftShoulderYaw', 'kLeftElbow', 'kLeftWristRoll', 'kLeftWristPitch', 'kLeftWristyaw'],
-                    "left_ee":  [],
-                    "right_arm":  [],
-                    "right_ee": [],
-                    "body":       [],
+                    "left_arm":   ['kLeftShoulderPitch', 'kLeftShoulderRoll', 'kLeftShoulderYaw', 'kLeftElbow', 'kLeftWristRoll', 'kLeftWristPitch', 'kLeftWristYaw'],
+                    "left_ee":    ['kLeftHandThumb0', 'kLeftHandThumb1', 'kLeftHandThumb2', 'kLeftHandMiddle0', 'kLeftHandMiddle1', 'kLeftHandIndex0', 'kLeftHandIndex1'],
+                    "right_arm":  ['kRightShoulderPitch', 'kRightShoulderRoll', 'kRightShoulderYaw', 'kRightElbow', 'kRightWristRoll', 'kRightWristPitch', 'kRightWristYaw'],
+                    "right_ee":   ['kRightHandThumb0', 'kRightHandThumb1', 'kRightHandThumb2', 'kRightHandIndex0', 'kRightHandIndex1', 'kRightHandMiddle0', 'kRightHandMiddle1'],
+                    "body":       ['kWaistYaw'],  # qpos: waist joint positions
+                },
+                
+                "velocity_names": {
+                    "body":       ['vx', 'vy', 'vyaw'],  # qvel: base navigation velocity commands (forward, left, rotation)
                 },
 
                 "tactile_names": {
