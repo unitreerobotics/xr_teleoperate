@@ -589,7 +589,7 @@ if __name__ == '__main__':
             left_press_base  = np.zeros(9, dtype=np.float64)
             press_base_ready = False
             press_base_samples = 0
-            PRESS_BASE_N = 30  # ~1s at 30Hz
+            PRESS_BASE_N = 5
 
             # PER-MOTOR hold tracking (like hand_controller.py)
             right_hold_logged = [False] * 7
@@ -690,20 +690,21 @@ if __name__ == '__main__':
         KD_HOLD = 0.2
 
         # Hysteresis thresholds (matching hand_controller.py)
-        PRESSURE_THRESHOLD = 0.1              # Higher - to ENTER hold
-        PRESSURE_THRESHOLD_BASE = 0.03         # Base sensor threshold (enter)
-        PRESSURE_THRESHOLD_EXIT = 0.05         # Lower - to EXIT hold (sticky)
-        PRESSURE_THRESHOLD_BASE_EXIT = 0.01    # Base sensor threshold (exit)
-        TORQUE_THRESHOLD_HIGH = 400000.0
+        PRESSURE_THRESHOLD = 0.04              # Higher - to ENTER hold
+        PRESSURE_THRESHOLD_BASE = 0.04         # Base sensor threshold (enter)
+        PRESSURE_THRESHOLD_EXIT = 0.03         # Lower - to EXIT hold (sticky)
+        PRESSURE_THRESHOLD_BASE_EXIT = 0.03    # Base sensor threshold (exit)
+        TORQUE_THRESHOLD_HIGH = 200000.0
         
         SQUEEZE_OFFSET = 0.05     # matching hand_controller.py
-        RAMP_FACTOR = 0.25        # smooth ramping
+        RAMP_FACTOR = 0.30        # smooth ramping
         THUMB_COMPLETION_THRESHOLD = 0.05
         
         # --- Tare (recalibration) tracking ---
-        TARE_DELAY = 0.8  # seconds to wait after trigger release before taring
-        right_trigger_released_time = None
-        left_trigger_released_time = None
+        # Arm tare on trigger press, but execute only when hand reaches fully-open pose.
+        TARE_OPEN_TOL = 0.05
+        right_tare_pending = False
+        left_tare_pending = False
         right_trigger_prev = False
         left_trigger_prev = False
         
@@ -806,6 +807,10 @@ if __name__ == '__main__':
                     # B button (left controller): rotate waist yaw to the left
                     arm_ctrl.ctrl_waist_yaw(-waist_rotation_speed)
                     logger_mp.debug(f"Waist yaw left: {arm_ctrl.get_waist_yaw_target():.3f}")
+                elif tele_data.tele_state.left_squeeze_ctrl_state:
+                    # Grip button (left controller): gradually reset waist yaw to zero
+                    arm_ctrl.reset_waist_yaw()
+                    logger_mp.debug(f"Waist yaw resetting to zero: {arm_ctrl.get_waist_yaw_target():.3f}")
 
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
@@ -822,19 +827,18 @@ if __name__ == '__main__':
             right_trigger = tele_data.tele_state.right_trigger_state
             left_trigger = tele_data.tele_state.left_trigger_state
             
-            # --- Detect trigger press and schedule tare ---
-            current_loop_time = time.time()
+            # --- Detect trigger press and arm tare ---
             
             # Right hand: detect rising edge (was not pressed, now pressed)
             if not right_trigger_prev and right_trigger:
-                right_trigger_released_time = current_loop_time
-                logger_mp.info("[TARE] Right trigger released, will tare after delay...")
+                right_tare_pending = True
+                logger_mp.info("[TARE] Right trigger pressed, waiting for fully-open hand to tare...")
             right_trigger_prev = right_trigger
             
-            # Left hand: detect rising edge
+            # Left hand: detect rising edge (was not pressed, now pressed)
             if not left_trigger_prev and left_trigger:
-                left_trigger_released_time = current_loop_time
-                logger_mp.info("[TARE] Left trigger released, will tare after delay...")
+                left_tare_pending = True
+                logger_mp.info("[TARE] Left trigger pressed, waiting for fully-open hand to tare...")
             left_trigger_prev = left_trigger
 
             # --- Read Dex3 state (tau_est + pressure) ---
@@ -883,18 +887,19 @@ if __name__ == '__main__':
                     # if state not available (sim / DDS hiccup), just keep last values
                     pass
                 
-                # --- Execute tare if delay has passed ---
-                if right_trigger_released_time is not None:
-                    if (current_loop_time - right_trigger_released_time) >= TARE_DELAY:
-                        right_press_base = right_press.copy()
-                        # logger_mp.info(f"[TARE] Right hand recalibrated! New baseline max: {np.max(right_press_base):.1f}")
-                        right_trigger_released_time = None
-                
-                if left_trigger_released_time is not None:
-                    if (current_loop_time - left_trigger_released_time) >= TARE_DELAY:
-                        left_press_base = left_press.copy()
-                        # logger_mp.info(f"[TARE] Left hand recalibrated! New baseline max: {np.max(left_press_base):.1f}")
-                        left_trigger_released_time = None
+                # --- Execute tare only when trigger is held and hand is fully open ---
+                right_is_fully_open = np.max(np.abs(right_ramped_target - open_pose)) <= TARE_OPEN_TOL
+                left_is_fully_open = np.max(np.abs(left_ramped_target - open_pose)) <= TARE_OPEN_TOL
+
+                if right_tare_pending and right_trigger and right_is_fully_open:
+                    right_press_base = right_press.copy()
+                    right_tare_pending = False
+                    logger_mp.info("[TARE] Right hand recalibrated at fully-open pose.")
+
+                if left_tare_pending and left_trigger and left_is_fully_open:
+                    left_press_base = left_press.copy()
+                    left_tare_pending = False
+                    logger_mp.info("[TARE] Left hand recalibrated at fully-open pose.")
 
                 # baseline-correct and normalize (divide by 100.0 like hand_controller.py)
                 PRESSURE_SCALE = 100.0
@@ -1235,17 +1240,18 @@ if __name__ == '__main__':
                 if args.binary_hand and args.xr_mode == "controller":
                     left_trigger_action = int(bool(left_trigger))
                     right_trigger_action = int(bool(right_trigger))
-                # waist/body state and action (only yaw - what we actually control)
+
+                # waist state and action (only yaw - what we actually control)
                 if WAIST_INDICES:
-                    current_body_state = [float(current_full_motor_q[WAIST_INDICES[0]])]
+                    current_waist_state = [float(current_full_motor_q[WAIST_INDICES[0]])]
                     waist_yaw_target = arm_ctrl.get_waist_yaw_target()
                     if waist_yaw_target is not None:
-                        current_body_action = [waist_yaw_target]
+                        current_waist_action = [waist_yaw_target]
                     else:
-                        current_body_action = current_body_state.copy()
+                        current_waist_action = current_waist_state.copy()
                 else:
-                    current_body_state = []
-                    current_body_action = []
+                    current_waist_state = []
+                    current_waist_action = []
         
                 # head image
                 current_tv_image = tv_img_array.copy()
@@ -1299,8 +1305,12 @@ if __name__ == '__main__':
                             "qvel":   [],                           
                             "torque": [],  
                         }, 
-                        "body": {
-                            "qpos": current_body_state,
+                        "waist": {
+                            "qpos": current_waist_state,
+                            "qvel": [], 
+                        },
+                        "base": {
+                            "qpos": [],  
                             "qvel": [], 
                         }, 
                     }
@@ -1325,9 +1335,13 @@ if __name__ == '__main__':
                             "qvel":   [],       
                             "torque": [], 
                         }, 
-                        "body": {
-                            "qpos": current_body_action,
-                            "qvel": [nav_vx, nav_vy, nav_vyaw],  # Navigation velocity command
+                         "waist": {
+                            "qpos": current_waist_action,
+                            "qvel": [],
+                        },
+                        "base": {
+                            "qpos": [],
+                            "qvel": [nav_vx, nav_vy, nav_vyaw], 
                         }, 
                     }
                     if args.binary_hand and args.xr_mode == "controller":
@@ -1361,6 +1375,10 @@ if __name__ == '__main__':
 
     except KeyboardInterrupt:
         logger_mp.info("KeyboardInterrupt, exiting program...")
+    except Exception as e:
+        logger_mp.error(f"Exception occurred: {type(e).__name__}: {e}")
+        import traceback
+        logger_mp.error(traceback.format_exc())
     finally:
         #arm_ctrl.ctrl_dual_arm_go_home()
 

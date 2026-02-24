@@ -72,11 +72,12 @@ class EpisodeWriter():
                     "left_ee":    ['kLeftHandThumb0', 'kLeftHandThumb1', 'kLeftHandThumb2', 'kLeftHandMiddle0', 'kLeftHandMiddle1', 'kLeftHandIndex0', 'kLeftHandIndex1'],
                     "right_arm":  ['kRightShoulderPitch', 'kRightShoulderRoll', 'kRightShoulderYaw', 'kRightElbow', 'kRightWristRoll', 'kRightWristPitch', 'kRightWristYaw'],
                     "right_ee":   ['kRightHandThumb0', 'kRightHandThumb1', 'kRightHandThumb2', 'kRightHandIndex0', 'kRightHandIndex1', 'kRightHandMiddle0', 'kRightHandMiddle1'],
-                    "body":       ['kWaistYaw'],  # qpos: waist joint positions
+                    "waist":      ['kWaistYaw'],  
+                    "base":       [],  
                 },
                 
                 "velocity_names": {
-                    "body":       ['vx', 'vy', 'vyaw'],  # qvel: base navigation velocity commands (forward, left, rotation)
+                    "base":       ['vx', 'vy', 'vyaw'],  
                 },
 
                 "tactile_names": {
