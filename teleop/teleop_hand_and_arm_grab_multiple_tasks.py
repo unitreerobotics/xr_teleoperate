@@ -45,6 +45,23 @@ from unitree_sdk2py.idl.default import unitree_hg_msg_dds__HandCmd_
 # for simulation
 from unitree_sdk2py.core.channel import ChannelPublisher
 from unitree_sdk2py.idl.std_msgs.msg.dds_ import String_
+
+
+def _redirect_cyclonedds_trace_log() -> None:
+    """
+    unitree_sdk2py hardcodes CycloneDDS trace output to /tmp/cdds.LOG when --iface is used.
+    Some environments deny writes to /tmp for this process, so redirect to local writable path.
+    """
+    try:
+        import unitree_sdk2py.core.channel as _dds_channel
+        cfg = getattr(_dds_channel, "ChannelConfigHasInterface", None)
+        if isinstance(cfg, str) and "/tmp/cdds.LOG" in cfg:
+            local_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cdds.LOG")
+            setattr(_dds_channel, "ChannelConfigHasInterface", cfg.replace("/tmp/cdds.LOG", local_log))
+            logger_mp.info(f"[dds] Redirect CycloneDDS trace log to: {local_log}")
+    except Exception as e:
+        logger_mp.warning(f"[dds] Failed to patch CycloneDDS trace log path: {e}")
+
 def publish_reset_category(category: int,publisher): # Scene Reset signal
     msg = String_(data=str(category))
     publisher.Write(msg)
@@ -345,6 +362,7 @@ if __name__ == '__main__':
     parser.add_argument('--affinity', action = 'store_true', help = 'Enable high priority and set CPU affinity')
     parser.add_argument('--ipc', action = 'store_true', help = 'Enable IPC server to handle input; otherwise enable sshkeyboard')
     parser.add_argument('--record', action = 'store_true', help = 'Enable data recording')
+    parser.add_argument('--binary-hand', action='store_true', help='Record end-effector open/close from controller trigger as 1/0 instead of finger joints')
     parser.add_argument('--record-side', type=str, choices=['left', 'right', 'both'], default='both', help='Select which side(s) to record')
     parser.add_argument('--task-dir', type = str, default = '/mnt/sata1/xr_teleoperate_datasets/', help = 'path to save data')
     parser.add_argument('--task-name', type = str, default = 'pick cube', help = 'task name for recording')
@@ -355,14 +373,20 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     logger_mp.info(f"args: {args}")
+    if args.binary_hand and args.xr_mode != "controller":
+        logger_mp.warning("--binary-hand is intended for --xr-mode controller. Current run may record default trigger state values.")
+    _redirect_cyclonedds_trace_log()
 
     try:
-        def filter_states_actions_by_side(states, actions, record_side):
+        def filter_states_actions_by_side(states, actions, record_side, tactiles=None):
+            if tactiles is None:
+                tactiles = {}
             if record_side == "both":
-                return states, actions
+                return states, actions, tactiles
             keep_prefix = "left" if record_side == "left" else "right"
             filtered_states = {key: value for key, value in states.items() if key.startswith(keep_prefix)}
             filtered_actions = {key: value for key, value in actions.items() if key.startswith(keep_prefix)}
+            filtered_tactiles = {key: value for key, value in tactiles.items() if key.startswith(keep_prefix)}
 
             # keep non-side specific entries such as body
             for key, value in states.items():
@@ -371,7 +395,10 @@ if __name__ == '__main__':
             for key, value in actions.items():
                 if not key.startswith(("left_", "right_")):
                     filtered_actions[key] = value
-            return filtered_states, filtered_actions
+            for key, value in tactiles.items():
+                if not key.startswith(("left_", "right_")):
+                    filtered_tactiles[key] = value
+            return filtered_states, filtered_actions, filtered_tactiles
 
         # multi-task prompts
         TASKS = load_tasks(args.tasks_file, args.tasks, args.task_name, args.task_desc)
@@ -639,6 +666,9 @@ if __name__ == '__main__':
                 frequency=args.frequency,
                 rerun_log=not args.headless,
             )
+            if args.binary_hand:
+                recorder.info["joint_names"]["left_ee"] = ["left_hand_open_close"]
+                recorder.info["joint_names"]["right_ee"] = ["right_hand_open_close"]
             apply_task_to_recorder(recorder, initial_task, TASK_IDX, args.task_name)
             logger_mp.info(f"Recording side: {args.record_side}")
 
@@ -1204,6 +1234,13 @@ if __name__ == '__main__':
                     right_ee_state = dual_hand_state_array[-7:]
                     left_hand_action = dual_hand_action_array[:7]
                     right_hand_action = dual_hand_action_array[-7:]
+                if args.binary_hand:
+                    left_open_close = int(bool(tele_data.tele_state.left_trigger_state))
+                    right_open_close = int(bool(tele_data.tele_state.right_trigger_state))
+                    left_ee_state = [left_open_close]
+                    right_ee_state = [right_open_close]
+                    left_hand_action = [left_open_close]
+                    right_hand_action = [right_open_close]
                 # waist/body state and action (only yaw - what we actually control)
                 if WAIST_INDICES:
                     current_body_state = [float(current_full_motor_q[WAIST_INDICES[0]])]
@@ -1299,12 +1336,21 @@ if __name__ == '__main__':
                             "qvel": [nav_vx, nav_vy, nav_vyaw],  # Navigation velocity command
                         }, 
                     }
-                    states, actions = filter_states_actions_by_side(states, actions, args.record_side)
+                    # Hand pressures (tactiles) if available
+                    tactiles = {}
+                    if args.ee == "dex3":
+                        if "right_press_corr" in locals(): # Defensive approach
+                            tactiles["right_ee"] = right_press_corr.tolist()
+                        if "left_press_corr" in locals(): # Defensive approach
+                            tactiles["left_ee"] = left_press_corr.tolist()
+                    states, actions, tactiles = filter_states_actions_by_side(
+                        states, actions, args.record_side, tactiles
+                    )
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, sim_state=sim_state)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, tactiles=tactiles, sim_state=sim_state)
                     else:
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, tactiles=tactiles)
 
             current_time = time.time()
             time_elapsed = current_time - start_time
