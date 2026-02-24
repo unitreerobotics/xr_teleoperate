@@ -232,6 +232,21 @@ class G1_29_ArmController:
     def get_waist_yaw_target(self):
         '''Return current waist yaw target position.'''
         return self.waist_yaw_target if self.waist_yaw_target is not None else 0.0
+    
+    def reset_waist_yaw(self, step_size=0.02):
+        '''
+        Gradually move waist yaw toward zero position.
+        step_size: how fast to move toward zero (rad/frame)
+        '''
+        if self.waist_yaw_target is None:
+            self.waist_yaw_target = 0.0
+            return
+        
+        if abs(self.waist_yaw_target) < step_size:
+            self.waist_yaw_target = 0.0  
+        else:
+            direction = -1.0 if self.waist_yaw_target > 0 else 1.0
+            self.waist_yaw_target += direction * step_size
 
     def get_mode_machine(self):
         '''Return current dds mode machine.'''

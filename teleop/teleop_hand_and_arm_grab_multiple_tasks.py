@@ -809,6 +809,10 @@ if __name__ == '__main__':
                     # B button (left controller): rotate waist yaw to the left
                     arm_ctrl.ctrl_waist_yaw(-waist_rotation_speed)
                     logger_mp.debug(f"Waist yaw left: {arm_ctrl.get_waist_yaw_target():.3f}")
+                elif tele_data.tele_state.left_squeeze_ctrl_state:
+                    # Grip button (left controller): gradually reset waist yaw to zero
+                    arm_ctrl.reset_waist_yaw()
+                    logger_mp.debug(f"Waist yaw resetting to zero: {arm_ctrl.get_waist_yaw_target():.3f}")
 
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
