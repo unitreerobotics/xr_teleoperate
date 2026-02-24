@@ -1242,17 +1242,17 @@ if __name__ == '__main__':
                     right_ee_state = [right_open_close]
                     left_hand_action = [left_open_close]
                     right_hand_action = [right_open_close]
-                # waist/body state and action (only yaw - what we actually control)
+                # waist state and action (only yaw - what we actually control)
                 if WAIST_INDICES:
-                    current_body_state = [float(current_full_motor_q[WAIST_INDICES[0]])]
+                    current_waist_state = [float(current_full_motor_q[WAIST_INDICES[0]])]
                     waist_yaw_target = arm_ctrl.get_waist_yaw_target()
                     if waist_yaw_target is not None:
-                        current_body_action = [waist_yaw_target]
+                        current_waist_action = [waist_yaw_target]
                     else:
-                        current_body_action = current_body_state.copy()
+                        current_waist_action = current_waist_state.copy()
                 else:
-                    current_body_state = []
-                    current_body_action = []
+                    current_waist_state = []
+                    current_waist_action = []
         
                 # head image
                 current_tv_image = tv_img_array.copy()
@@ -1306,8 +1306,12 @@ if __name__ == '__main__':
                             "qvel":   [],                           
                             "torque": [],  
                         }, 
-                        "body": {
-                            "qpos": current_body_state,
+                        "waist": {
+                            "qpos": current_waist_state,
+                            "qvel": [], 
+                        },
+                        "base": {
+                            "qpos": [],  
                             "qvel": [], 
                         }, 
                     }
@@ -1332,9 +1336,13 @@ if __name__ == '__main__':
                             "qvel":   [],       
                             "torque": [], 
                         }, 
-                        "body": {
-                            "qpos": current_body_action,
-                            "qvel": [nav_vx, nav_vy, nav_vyaw],  # Navigation velocity command
+                        "waist": {
+                            "qpos": current_waist_action,
+                            "qvel": [],
+                        },
+                        "base": {
+                            "qpos": [],
+                            "qvel": [nav_vx, nav_vy, nav_vyaw], 
                         }, 
                     }
                     # Hand pressures (tactiles) if available
