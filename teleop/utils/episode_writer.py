@@ -81,8 +81,8 @@ class EpisodeWriter():
                 },
 
                 "tactile_names": {
-                    "left_ee": [],
-                    "right_ee": [],
+                    "left_ee": ['thumb_base', 'thumb_tip', 'middle_base', 'middle_tip', 'index_base', 'index_tip', 'palm_0', 'palm_1', 'palm_2'],
+                    "right_ee": ['thumb_base', 'thumb_tip', 'index_base', 'index_tip', 'middle_base', 'middle_tip', 'palm_0', 'palm_1', 'palm_2'],
                 }, 
                 "sim_state": ""
             }
