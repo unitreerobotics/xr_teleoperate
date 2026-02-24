@@ -94,15 +94,12 @@ if __name__ == '__main__':
     parser.add_argument('--affinity', action = 'store_true', help = 'Enable high priority and set CPU affinity')
     parser.add_argument('--ipc', action = 'store_true', help = 'Enable IPC server to handle input; otherwise enable sshkeyboard')
     parser.add_argument('--record', action = 'store_true', help = 'Enable data recording')
-    parser.add_argument('--binary-hand', action='store_true', help='Record end-effector open/close from controller trigger as 1/0 instead of finger joints')
     parser.add_argument('--task-dir', type = str, default = './utils/data/', help = 'path to save data')
     parser.add_argument('--task-name', type = str, default = 'pick cube', help = 'task name for recording')
     parser.add_argument('--task-desc', type = str, default = 'e.g. pick the red cube on the table.', help = 'task goal for recording')
 
     args = parser.parse_args()
     logger_mp.info(f"args: {args}")
-    if args.binary_hand and args.xr_mode != "controller":
-        logger_mp.warning("--binary-hand is intended for --xr-mode controller. Current run may record default trigger state values.")
 
     try:
         # ipc communication. client usage: see utils/ipc.py
@@ -425,11 +422,6 @@ if __name__ == '__main__':
                     right_hand_action = []
                     current_body_state = []
                     current_body_action = []
-                if args.binary_hand:
-                    left_open_close = int(bool(tele_data.tele_state.left_trigger_state))
-                    right_open_close = int(bool(tele_data.tele_state.right_trigger_state))
-                    left_hand_action = [left_open_close]
-                    right_hand_action = [right_open_close]
                 # head image
                 current_tv_image = tv_img_array.copy()
                 # wrist image

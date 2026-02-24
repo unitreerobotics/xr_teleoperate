@@ -362,7 +362,6 @@ if __name__ == '__main__':
     parser.add_argument('--affinity', action = 'store_true', help = 'Enable high priority and set CPU affinity')
     parser.add_argument('--ipc', action = 'store_true', help = 'Enable IPC server to handle input; otherwise enable sshkeyboard')
     parser.add_argument('--record', action = 'store_true', help = 'Enable data recording')
-    parser.add_argument('--binary-hand', action='store_true', help='Record end-effector open/close from controller trigger as 1/0 instead of finger joints')
     parser.add_argument('--record-side', type=str, choices=['left', 'right', 'both'], default='both', help='Select which side(s) to record')
     parser.add_argument('--task-dir', type = str, default = '/mnt/sata1/xr_teleoperate_datasets/', help = 'path to save data')
     parser.add_argument('--task-name', type = str, default = 'pick cube', help = 'task name for recording')
@@ -373,8 +372,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     logger_mp.info(f"args: {args}")
-    if args.binary_hand and args.xr_mode != "controller":
-        logger_mp.warning("--binary-hand is intended for --xr-mode controller. Current run may record default trigger state values.")
     _redirect_cyclonedds_trace_log()
 
     try:
@@ -1231,11 +1228,6 @@ if __name__ == '__main__':
                     right_ee_state = dual_hand_state_array[-7:]
                     left_hand_action = dual_hand_action_array[:7]
                     right_hand_action = dual_hand_action_array[-7:]
-                if args.binary_hand:
-                    left_open_close = int(bool(tele_data.tele_state.left_trigger_state))
-                    right_open_close = int(bool(tele_data.tele_state.right_trigger_state))
-                    left_hand_action = [left_open_close]
-                    right_hand_action = [right_open_close]
                 # waist/body state and action (only yaw - what we actually control)
                 if WAIST_INDICES:
                     current_body_state = [float(current_full_motor_q[WAIST_INDICES[0]])]
