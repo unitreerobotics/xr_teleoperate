@@ -357,12 +357,15 @@ if __name__ == '__main__':
     logger_mp.info(f"args: {args}")
 
     try:
-        def filter_states_actions_by_side(states, actions, record_side):
+        def filter_states_actions_by_side(states, actions, record_side, tactiles=None):
+            if tactiles is None:
+                tactiles = {}
             if record_side == "both":
-                return states, actions
+                return states, actions, tactiles
             keep_prefix = "left" if record_side == "left" else "right"
             filtered_states = {key: value for key, value in states.items() if key.startswith(keep_prefix)}
             filtered_actions = {key: value for key, value in actions.items() if key.startswith(keep_prefix)}
+            filtered_tactiles = {key: value for key, value in tactiles.items() if key.startswith(keep_prefix)}
 
             # keep non-side specific entries such as body
             for key, value in states.items():
@@ -371,7 +374,10 @@ if __name__ == '__main__':
             for key, value in actions.items():
                 if not key.startswith(("left_", "right_")):
                     filtered_actions[key] = value
-            return filtered_states, filtered_actions
+            for key, value in tactiles.items():
+                if not key.startswith(("left_", "right_")):
+                    filtered_tactiles[key] = value
+            return filtered_states, filtered_actions, filtered_tactiles
 
         # multi-task prompts
         TASKS = load_tasks(args.tasks_file, args.tasks, args.task_name, args.task_desc)
@@ -1299,12 +1305,21 @@ if __name__ == '__main__':
                             "qvel": [nav_vx, nav_vy, nav_vyaw],  # Navigation velocity command
                         }, 
                     }
-                    states, actions = filter_states_actions_by_side(states, actions, args.record_side)
+                    # Hand pressures (tactiles) if available
+                    tactiles = {}
+                    if args.ee == "dex3":
+                        if "right_press_corr" in locals(): # Defensive approach
+                            tactiles["right_ee"] = right_press_corr.tolist()
+                        if "left_press_corr" in locals(): # Defensive approach
+                            tactiles["left_ee"] = left_press_corr.tolist()
+                    states, actions, tactiles = filter_states_actions_by_side(
+                        states, actions, args.record_side, tactiles
+                    )
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, sim_state=sim_state)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, tactiles=tactiles, sim_state=sim_state)
                     else:
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, tactiles=tactiles)
 
             current_time = time.time()
             time_elapsed = current_time - start_time
