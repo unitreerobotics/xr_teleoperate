@@ -104,6 +104,7 @@ if __name__ == '__main__':
     parser.add_argument('--affinity', action = 'store_true', help = 'Enable high priority and set CPU affinity')
     parser.add_argument('--ipc', action = 'store_true', help = 'Enable IPC server to handle input; otherwise enable sshkeyboard')
     parser.add_argument('--record', action = 'store_true', help = 'Enable data recording')
+    parser.add_argument('--binary-hand', action = 'store_true', help = 'Record controller trigger presses as binary action entries')
     parser.add_argument('--record-side', type=str, choices=['left', 'right', 'both'], default='both', help='Select which side(s) to record')
     parser.add_argument('--task-dir', type = str, default = './utils/data/', help = 'path to save data')
     parser.add_argument('--task-name', type = str, default = 'pick cube', help = 'task name for recording')
@@ -381,6 +382,9 @@ if __name__ == '__main__':
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = False)
         elif args.record and not args.headless:
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = True)
+        if args.record and args.binary_hand and args.xr_mode == "controller":
+            recorder.info["joint_names"]["left_trig"] = ["left_trig"]
+            recorder.info["joint_names"]["right_trig"] = ["right_trig"]
         if args.record:
             logger_mp.info(f"Recording side: {args.record_side}")
 
@@ -898,6 +902,9 @@ if __name__ == '__main__':
                     right_hand_action = dual_hand_action_array[-7:]
                     current_body_state = []
                     current_body_action = []
+                if args.binary_hand and args.xr_mode == "controller":
+                    left_trigger_action = int(bool(left_trigger))
+                    right_trigger_action = int(bool(right_trigger))
                 # head image
                 current_tv_image = tv_img_array.copy()
                 # wrist image
@@ -979,6 +986,13 @@ if __name__ == '__main__':
                             "qpos": current_body_action,
                         }, 
                     }
+                    if args.binary_hand and args.xr_mode == "controller":
+                        actions["left_trig"] = {
+                            "qpos": [left_trigger_action],
+                        }
+                        actions["right_trig"] = {
+                            "qpos": [right_trigger_action],
+                        }
                     states, actions = filter_states_actions_by_side(states, actions, args.record_side)
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            

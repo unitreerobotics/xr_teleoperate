@@ -94,6 +94,7 @@ if __name__ == '__main__':
     parser.add_argument('--affinity', action = 'store_true', help = 'Enable high priority and set CPU affinity')
     parser.add_argument('--ipc', action = 'store_true', help = 'Enable IPC server to handle input; otherwise enable sshkeyboard')
     parser.add_argument('--record', action = 'store_true', help = 'Enable data recording')
+    parser.add_argument('--binary-hand', action = 'store_true', help = 'Record controller trigger presses as binary action entries')
     parser.add_argument('--task-dir', type = str, default = './utils/data/', help = 'path to save data')
     parser.add_argument('--task-name', type = str, default = 'pick cube', help = 'task name for recording')
     parser.add_argument('--task-desc', type = str, default = 'e.g. pick the red cube on the table.', help = 'task goal for recording')
@@ -260,6 +261,9 @@ if __name__ == '__main__':
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = False)
         elif args.record and not args.headless:
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = True)
+        if args.record and args.binary_hand and args.xr_mode == "controller":
+            recorder.info["joint_names"]["left_trig"] = ["left_trig"]
+            recorder.info["joint_names"]["right_trig"] = ["right_trig"]
         logger_mp.info("Please enter the start signal (enter 'r' to start the subsequent program)")
         while not START and not STOP:
             time.sleep(0.01)
@@ -422,6 +426,10 @@ if __name__ == '__main__':
                     right_hand_action = []
                     current_body_state = []
                     current_body_action = []
+                if args.binary_hand and args.xr_mode == "controller":
+                    tele_state = getattr(tele_data, "tele_state", None)
+                    left_trigger_action = int(bool(getattr(tele_state, "left_trigger_state", False)))
+                    right_trigger_action = int(bool(getattr(tele_state, "right_trigger_state", False)))
                 # head image
                 current_tv_image = tv_img_array.copy()
                 # wrist image
@@ -496,6 +504,13 @@ if __name__ == '__main__':
                             "qpos": current_body_action,
                         }, 
                     }
+                    if args.binary_hand and args.xr_mode == "controller":
+                        actions["left_trig"] = {
+                            "qpos": [left_trigger_action],
+                        }
+                        actions["right_trig"] = {
+                            "qpos": [right_trigger_action],
+                        }
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            
                         recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, sim_state=sim_state)
