@@ -45,6 +45,23 @@ from unitree_sdk2py.idl.default import unitree_hg_msg_dds__HandCmd_
 # for simulation
 from unitree_sdk2py.core.channel import ChannelPublisher
 from unitree_sdk2py.idl.std_msgs.msg.dds_ import String_
+
+
+def _redirect_cyclonedds_trace_log() -> None:
+    """
+    unitree_sdk2py hardcodes CycloneDDS trace output to /tmp/cdds.LOG when --iface is used.
+    Some environments deny writes to /tmp for this process, so redirect to local writable path.
+    """
+    try:
+        import unitree_sdk2py.core.channel as _dds_channel
+        cfg = getattr(_dds_channel, "ChannelConfigHasInterface", None)
+        if isinstance(cfg, str) and "/tmp/cdds.LOG" in cfg:
+            local_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cdds.LOG")
+            setattr(_dds_channel, "ChannelConfigHasInterface", cfg.replace("/tmp/cdds.LOG", local_log))
+            logger_mp.info(f"[dds] Redirect CycloneDDS trace log to: {local_log}")
+    except Exception as e:
+        logger_mp.warning(f"[dds] Failed to patch CycloneDDS trace log path: {e}")
+
 def publish_reset_category(category: int,publisher): # Scene Reset signal
     msg = String_(data=str(category))
     publisher.Write(msg)
@@ -355,6 +372,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     logger_mp.info(f"args: {args}")
+    _redirect_cyclonedds_trace_log()
 
     try:
         def filter_states_actions_by_side(states, actions, record_side, tactiles=None):
