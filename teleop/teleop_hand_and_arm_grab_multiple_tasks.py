@@ -666,9 +666,6 @@ if __name__ == '__main__':
                 frequency=args.frequency,
                 rerun_log=not args.headless,
             )
-            if args.binary_hand:
-                recorder.info["joint_names"]["left_ee"] = ["left_hand_open_close"]
-                recorder.info["joint_names"]["right_ee"] = ["right_hand_open_close"]
             apply_task_to_recorder(recorder, initial_task, TASK_IDX, args.task_name)
             logger_mp.info(f"Recording side: {args.record_side}")
 
@@ -1237,8 +1234,6 @@ if __name__ == '__main__':
                 if args.binary_hand:
                     left_open_close = int(bool(tele_data.tele_state.left_trigger_state))
                     right_open_close = int(bool(tele_data.tele_state.right_trigger_state))
-                    left_ee_state = [left_open_close]
-                    right_ee_state = [right_open_close]
                     left_hand_action = [left_open_close]
                     right_hand_action = [right_open_close]
                 # waist/body state and action (only yaw - what we actually control)

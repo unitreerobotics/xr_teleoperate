@@ -263,11 +263,6 @@ if __name__ == '__main__':
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = False)
         elif args.record and not args.headless:
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = True)
-        if args.record and args.binary_hand:
-            recorder.info["joint_names"]["left_ee"] = ["left_hand_open_close"]
-            recorder.info["joint_names"]["right_ee"] = ["right_hand_open_close"]
-
-
         logger_mp.info("Please enter the start signal (enter 'r' to start the subsequent program)")
         while not START and not STOP:
             time.sleep(0.01)
@@ -433,8 +428,6 @@ if __name__ == '__main__':
                 if args.binary_hand:
                     left_open_close = int(bool(tele_data.tele_state.left_trigger_state))
                     right_open_close = int(bool(tele_data.tele_state.right_trigger_state))
-                    left_ee_state = [left_open_close]
-                    right_ee_state = [right_open_close]
                     left_hand_action = [left_open_close]
                     right_hand_action = [right_open_close]
                 # head image
