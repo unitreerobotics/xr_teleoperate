@@ -285,6 +285,29 @@ class G1_29_ArmController:
             current_attempts += 1
             time.sleep(0.05)
 
+    def ctrl_dual_arm_go_rest(self):
+        '''Move both arms to a fixed predefined resting pose.'''
+        logger_mp.info("[G1_29_ArmController] ctrl_dual_arm_go_rest start...")
+        rest_q = np.array([
+            0.28648290038108826, 0.22041386365890503, -0.01690974272787571,
+            0.9790273308753967, 0.10849319398403168, 0.053367193788290024,
+            -0.024075830355286598, 0.2865667939186096, -0.21115006506443024,
+            0.023549001663923264, 0.986038088798523, -0.15373364090919495,
+            0.05697204917669296, 0.013767478056252003
+        ], dtype=float)
+
+        duration = 3.0
+        start_q = self.get_current_dual_arm_q().copy()
+        steps = max(1, int(duration / self.control_dt))
+        dt = duration / steps
+
+        for i in range(1, steps + 1):
+            alpha = i / steps
+            q_interp = (1.0 - alpha) * start_q + alpha * rest_q
+            with self.ctrl_lock:
+                self.q_target = q_interp
+            time.sleep(dt)
+
     def speed_gradual_max(self, t = 5.0):
         '''Parameter t is the total time required for arms velocity to gradually increase to its maximum value, in seconds. The default is 5.0.'''
         self._gradual_start_time = time.time()

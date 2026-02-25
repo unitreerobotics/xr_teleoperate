@@ -894,12 +894,12 @@ if __name__ == '__main__':
                 if right_tare_pending and right_trigger and right_is_fully_open:
                     right_press_base = right_press.copy()
                     right_tare_pending = False
-                    logger_mp.info("[TARE] Right hand recalibrated at fully-open pose.")
+                    logger_mp.debug("[TARE] Right hand recalibrated at fully-open pose.")
 
                 if left_tare_pending and left_trigger and left_is_fully_open:
                     left_press_base = left_press.copy()
                     left_tare_pending = False
-                    logger_mp.info("[TARE] Left hand recalibrated at fully-open pose.")
+                    logger_mp.debug("[TARE] Left hand recalibrated at fully-open pose.")
 
                 # baseline-correct and normalize (divide by 100.0 like hand_controller.py)
                 PRESSURE_SCALE = 100.0
@@ -1380,7 +1380,10 @@ if __name__ == '__main__':
         import traceback
         logger_mp.error(traceback.format_exc())
     finally:
-        #arm_ctrl.ctrl_dual_arm_go_home()
+        try:
+            arm_ctrl.ctrl_dual_arm_go_rest()
+        except Exception as e:
+            logger_mp.warning(f"Failed to move arm to rest on exit: {e}")
 
         try:
             if args.ipc:
