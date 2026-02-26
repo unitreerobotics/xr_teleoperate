@@ -342,8 +342,6 @@ def main() -> None:
         if dst.exists() and args.overwrite:
             shutil.rmtree(dst)
         dst.mkdir(parents=True, exist_ok=True)
-        for sub in sub_roots:
-            sub.mkdir(parents=True, exist_ok=True)
 
     print(f"Source: {src}")
     print(f"Destination: {dst}")
@@ -409,6 +407,8 @@ def main() -> None:
         for i, (start, end) in enumerate(ranges, start=1):
             out_ep_dir = sub_roots[i - 1] / ep_dir.name
             sliced_frames = frames[start:end]
+            if not sliced_frames:
+                continue
             write_sub_episode(
                 src_episode_dir=ep_dir,
                 dst_episode_dir=out_ep_dir,
