@@ -16,7 +16,11 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from teleop.utils.cut_episode import copy_rel_file, load_json, save_json
+try:
+    from teleop.utils.cut_episode import copy_rel_file, load_json, save_json
+except ModuleNotFoundError:
+    # Supports direct script execution from within teleop/ (no top-level teleop package on sys.path).
+    from cut_episode import copy_rel_file, load_json, save_json
 
 
 def parse_cuts(raw: str) -> list[tuple[int, int, int]]:
