@@ -1345,6 +1345,12 @@ if __name__ == '__main__':
                         }, 
                     }
                     if args.binary_hand and args.xr_mode == "controller":
+                        states["left_trig"] = {
+                            "qpos": [left_trigger_action],
+                        }
+                        states["right_trig"] = {
+                            "qpos": [right_trigger_action],
+                        }
                         actions["left_trig"] = {
                             "qpos": [left_trigger_action],
                         }
