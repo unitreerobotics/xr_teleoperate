@@ -3,30 +3,33 @@ from pathlib import Path
 import yaml
 from enum import Enum
 import logging_mp
+
+try:
+    from teleop.project_paths import ASSETS_DIR
+except ImportError:
+    from project_paths import ASSETS_DIR
+
 logger_mp = logging_mp.get_logger(__name__)
 
 class HandType(Enum):
-    INSPIRE_HAND = "../assets/inspire_hand/inspire_hand.yml"
-    INSPIRE_HAND_Unit_Test = "../../assets/inspire_hand/inspire_hand.yml"
-    UNITREE_DEX3 = "../assets/unitree_hand/unitree_dex3.yml"
-    UNITREE_DEX3_Unit_Test = "../../assets/unitree_hand/unitree_dex3.yml"
-    BRAINCO_HAND = "../assets/brainco_hand/brainco.yml"
-    BRAINCO_HAND_Unit_Test = "../../assets/brainco_hand/brainco.yml"
+    INSPIRE_HAND = ASSETS_DIR / "inspire_hand/inspire_hand.yml"
+    INSPIRE_HAND_Unit_Test = ASSETS_DIR / "inspire_hand/inspire_hand.yml"
+    UNITREE_DEX3 = ASSETS_DIR / "unitree_hand/unitree_dex3.yml"
+    UNITREE_DEX3_Unit_Test = ASSETS_DIR / "unitree_hand/unitree_dex3.yml"
+    BRAINCO_HAND = ASSETS_DIR / "brainco_hand/brainco.yml"
+    BRAINCO_HAND_Unit_Test = ASSETS_DIR / "brainco_hand/brainco.yml"
 
 class HandRetargeting:
     def __init__(self, hand_type: HandType):
-        if hand_type == HandType.UNITREE_DEX3:
-            RetargetingConfig.set_default_urdf_dir('../assets')
-        elif hand_type == HandType.UNITREE_DEX3_Unit_Test:
-            RetargetingConfig.set_default_urdf_dir('../../assets')
-        elif hand_type == HandType.INSPIRE_HAND:
-            RetargetingConfig.set_default_urdf_dir('../assets')
-        elif hand_type == HandType.INSPIRE_HAND_Unit_Test:
-            RetargetingConfig.set_default_urdf_dir('../../assets')
-        elif hand_type == HandType.BRAINCO_HAND:
-            RetargetingConfig.set_default_urdf_dir('../assets')
-        elif hand_type == HandType.BRAINCO_HAND_Unit_Test:
-            RetargetingConfig.set_default_urdf_dir('../../assets')
+        if hand_type in (
+            HandType.UNITREE_DEX3,
+            HandType.UNITREE_DEX3_Unit_Test,
+            HandType.INSPIRE_HAND,
+            HandType.INSPIRE_HAND_Unit_Test,
+            HandType.BRAINCO_HAND,
+            HandType.BRAINCO_HAND_Unit_Test,
+        ):
+            RetargetingConfig.set_default_urdf_dir(str(ASSETS_DIR))
 
         config_file_path = Path(hand_type.value)
 
