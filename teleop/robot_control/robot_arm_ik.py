@@ -5,12 +5,14 @@ import pinocchio as pin
 import time
 from pinocchio import casadi as cpin    
 from pinocchio.visualize import MeshcatVisualizer   
-import os
-import sys
 import logging_mp
+
+try:
+    from teleop.project_paths import ASSETS_DIR
+except ImportError:
+    from project_paths import ASSETS_DIR
+
 logger_mp = logging_mp.get_logger(__name__)
-parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(parent2_dir)
 
 from teleop.utils.weighted_moving_filter import WeightedMovingFilter
 
@@ -21,10 +23,10 @@ class G1_29_ArmIK:
         self.Unit_Test = Unit_Test
         self.Visualization = Visualization
 
-        if not self.Unit_Test:
-            self.robot = pin.RobotWrapper.BuildFromURDF('../assets/g1/g1_body29_hand14.urdf', '../assets/g1/')
-        else:
-            self.robot = pin.RobotWrapper.BuildFromURDF('../../assets/g1/g1_body29_hand14.urdf', '../../assets/g1/') # for test
+        self.robot = pin.RobotWrapper.BuildFromURDF(
+            str(ASSETS_DIR / "g1/g1_body29_hand14.urdf"),
+            str(ASSETS_DIR / "g1"),
+        )
 
         self.mixed_jointsToLockIDs = [
                                         "left_hip_pitch_joint" ,
@@ -267,10 +269,10 @@ class G1_23_ArmIK:
         self.Unit_Test = Unit_Test
         self.Visualization = Visualization
 
-        if not self.Unit_Test:
-            self.robot = pin.RobotWrapper.BuildFromURDF('../assets/g1/g1_body23.urdf', '../assets/g1/')
-        else:
-            self.robot = pin.RobotWrapper.BuildFromURDF('../../assets/g1/g1_body23.urdf', '../../assets/g1/') # for test
+        self.robot = pin.RobotWrapper.BuildFromURDF(
+            str(ASSETS_DIR / "g1/g1_body23.urdf"),
+            str(ASSETS_DIR / "g1"),
+        )
 
         self.mixed_jointsToLockIDs = [
                                         "left_hip_pitch_joint" ,
@@ -494,10 +496,10 @@ class H1_2_ArmIK:
         self.Unit_Test = Unit_Test
         self.Visualization = Visualization
 
-        if not self.Unit_Test:
-            self.robot = pin.RobotWrapper.BuildFromURDF('../assets/h1_2/h1_2.urdf', '../assets/h1_2/')
-        else:
-            self.robot = pin.RobotWrapper.BuildFromURDF('../../assets/h1_2/h1_2.urdf', '../../assets/h1_2/') # for test
+        self.robot = pin.RobotWrapper.BuildFromURDF(
+            str(ASSETS_DIR / "h1_2/h1_2.urdf"),
+            str(ASSETS_DIR / "h1_2"),
+        )
 
         self.mixed_jointsToLockIDs = [
                                       "left_hip_yaw_joint",
@@ -744,10 +746,10 @@ class H1_ArmIK:
         self.Unit_Test = Unit_Test
         self.Visualization = Visualization
 
-        if not self.Unit_Test:
-            self.robot = pin.RobotWrapper.BuildFromURDF('../assets/h1/h1_with_hand.urdf', '../assets/h1/')
-        else:
-            self.robot = pin.RobotWrapper.BuildFromURDF('../../assets/h1/h1_with_hand.urdf', '../../assets/h1/') # for test
+        self.robot = pin.RobotWrapper.BuildFromURDF(
+            str(ASSETS_DIR / "h1/h1_with_hand.urdf"),
+            str(ASSETS_DIR / "h1"),
+        )
 
         self.mixed_jointsToLockIDs = [
                                         "right_hip_roll_joint",
