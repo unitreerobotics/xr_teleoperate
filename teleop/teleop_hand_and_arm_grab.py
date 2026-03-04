@@ -114,12 +114,15 @@ if __name__ == '__main__':
     logger_mp.info(f"args: {args}")
 
     try:
-        def filter_states_actions_by_side(states, actions, record_side):
+        def filter_states_actions_by_side(states, actions, record_side, torques=None):
+            if torques is None:
+                torques = {}
             if record_side == "both":
-                return states, actions
+                return states, actions, torques
             keep_prefix = "left" if record_side == "left" else "right"
             filtered_states = {key: value for key, value in states.items() if key.startswith(keep_prefix)}
             filtered_actions = {key: value for key, value in actions.items() if key.startswith(keep_prefix)}
+            filtered_torques = {key: value for key, value in torques.items() if key.startswith(keep_prefix)}
 
             # keep non-side specific entries such as body
             for key, value in states.items():
@@ -128,7 +131,10 @@ if __name__ == '__main__':
             for key, value in actions.items():
                 if not key.startswith(("left_", "right_")):
                     filtered_actions[key] = value
-            return filtered_states, filtered_actions
+            for key, value in torques.items():
+                if not key.startswith(("left_", "right_")):
+                    filtered_torques[key] = value
+            return filtered_states, filtered_actions, filtered_torques
 
         # ipc communication. client usage: see utils/ipc.py
         if args.ipc:
@@ -999,12 +1005,16 @@ if __name__ == '__main__':
                         actions["right_trig"] = {
                             "qpos": [right_trigger_action],
                         }
-                    states, actions = filter_states_actions_by_side(states, actions, args.record_side)
+                    torques = {}
+                    if args.ee == "dex3":
+                        torques["right_ee"] = right_tau.tolist()
+                        torques["left_ee"] = left_tau.tolist()
+                    states, actions, torques = filter_states_actions_by_side(states, actions, args.record_side, torques)
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, sim_state=sim_state)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, torques=torques, sim_state=sim_state)
                     else:
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, torques=torques)
 
             current_time = time.time()
             time_elapsed = current_time - start_time

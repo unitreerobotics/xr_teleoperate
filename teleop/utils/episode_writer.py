@@ -83,7 +83,11 @@ class EpisodeWriter():
                 "tactile_names": {
                     "left_ee": ['thumb_base', 'thumb_tip', 'middle_base', 'middle_tip', 'index_base', 'index_tip', 'palm_0', 'palm_1', 'palm_2'],
                     "right_ee": ['thumb_base', 'thumb_tip', 'index_base', 'index_tip', 'middle_base', 'middle_tip', 'palm_0', 'palm_1', 'palm_2'],
-                }, 
+                },
+                "torque_names": {
+                    "left_ee": ['kLeftHandThumb0', 'kLeftHandThumb1', 'kLeftHandThumb2', 'kLeftHandMiddle0', 'kLeftHandMiddle1', 'kLeftHandIndex0', 'kLeftHandIndex1'],
+                    "right_ee": ['kRightHandThumb0', 'kRightHandThumb1', 'kRightHandThumb2', 'kRightHandIndex0', 'kRightHandIndex1', 'kRightHandMiddle0', 'kRightHandMiddle1'],
+                },
                 "sim_state": ""
             }
 
@@ -127,7 +131,7 @@ class EpisodeWriter():
         logger_mp.info(f"==> New episode created: {self.episode_dir}")
         return True  # Return True if the episode is successfully created
         
-    def add_item(self, colors, depths=None, states=None, actions=None, tactiles=None, audios=None, sim_state=None):
+    def add_item(self, colors, depths=None, states=None, actions=None, tactiles=None, torques=None, audios=None, sim_state=None):
         # Increment the item ID
         self.item_id += 1
         # Create the item data dictionary
@@ -138,6 +142,7 @@ class EpisodeWriter():
             'states': states,
             'actions': actions,
             'tactiles': tactiles,
+            'torques': torques,
             'audios': audios,
             'sim_state': sim_state,
         }
