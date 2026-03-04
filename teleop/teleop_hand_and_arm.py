@@ -86,6 +86,7 @@ if __name__ == '__main__':
     parser.add_argument('--xr-mode', type=str, choices=['hand', 'controller'], default='hand', help='Select XR device tracking source')
     parser.add_argument('--arm', type=str, choices=['G1_29', 'G1_23', 'H1_2', 'H1'], default='G1_29', help='Select arm controller')
     parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'inspire1', 'brainco'], help='Select end effector controller')
+    parser.add_argument('--port', type=int, default=8012, help='Vuer server port (default: 8012)')
     # mode flags
     parser.add_argument('--motion', action = 'store_true', help = 'Enable motion control mode')
     parser.add_argument('--headless', action='store_true', help='Enable headless mode (no display)')
@@ -172,7 +173,7 @@ if __name__ == '__main__':
 
         # television: obtain hand pose data from the XR device and transmit the robot's head camera image to the XR device.
         tv_wrapper = TeleVuerWrapper(binocular=BINOCULAR, use_hand_tracking=args.xr_mode == "hand", img_shape=tv_img_shape, img_shm_name=tv_img_shm.name, 
-                                     return_state_data=True, return_hand_rot_data = False)
+                                     return_state_data=True, return_hand_rot_data = False, port=args.port)
         
 
         # arm
@@ -259,8 +260,9 @@ if __name__ == '__main__':
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = False)
         elif args.record and not args.headless:
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = True)
-
-
+        if args.record and args.xr_mode == "controller":
+            recorder.info["joint_names"]["left_trig"] = ["left_trig"]
+            recorder.info["joint_names"]["right_trig"] = ["right_trig"]
         logger_mp.info("Please enter the start signal (enter 'r' to start the subsequent program)")
         while not START and not STOP:
             time.sleep(0.01)
@@ -341,6 +343,18 @@ if __name__ == '__main__':
                                   -tele_data.tele_state.left_thumbstick_value[0]  * 0.3,
                                   -tele_data.tele_state.right_thumbstick_value[0] * 0.3)
 
+            # waist yaw control with A and B buttons (for controller mode)
+            if args.xr_mode == "controller":
+                waist_rotation_speed = 0.01  # radians per frame (adjust for slower/faster rotation)
+                if tele_data.tele_state.left_aButton:
+                    # A button (left controller): rotate waist yaw to the right
+                    arm_ctrl.ctrl_waist_yaw(waist_rotation_speed)
+                    logger_mp.debug(f"Waist yaw right: {arm_ctrl.get_waist_yaw_target():.3f}")
+                elif tele_data.tele_state.left_bButton:
+                    # B button (left controller): rotate waist yaw to the left
+                    arm_ctrl.ctrl_waist_yaw(-waist_rotation_speed)
+                    logger_mp.debug(f"Waist yaw left: {arm_ctrl.get_waist_yaw_target():.3f}")
+
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
             current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
@@ -411,6 +425,10 @@ if __name__ == '__main__':
                     right_hand_action = []
                     current_body_state = []
                     current_body_action = []
+                if args.xr_mode == "controller":
+                    tele_state = getattr(tele_data, "tele_state", None)
+                    left_trigger_action = int(bool(getattr(tele_state, "left_trigger_state", False)))
+                    right_trigger_action = int(bool(getattr(tele_state, "right_trigger_state", False)))
                 # head image
                 current_tv_image = tv_img_array.copy()
                 # wrist image
@@ -485,6 +503,13 @@ if __name__ == '__main__':
                             "qpos": current_body_action,
                         }, 
                     }
+                    if args.xr_mode == "controller":
+                        actions["left_trig"] = {
+                            "qpos": [left_trigger_action],
+                        }
+                        actions["right_trig"] = {
+                            "qpos": [right_trigger_action],
+                        }
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            
                         recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, sim_state=sim_state)

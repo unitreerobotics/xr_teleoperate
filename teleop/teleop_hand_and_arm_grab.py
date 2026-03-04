@@ -96,6 +96,7 @@ if __name__ == '__main__':
     parser.add_argument('--arm', type=str, choices=['G1_29', 'G1_23', 'H1_2', 'H1'], default='G1_29', help='Select arm controller')
     parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'inspire1', 'brainco', 'fake_dex'], help='Select end effector controller')
     parser.add_argument('--iface', type=str, default='enx98fc84ec937b', help='Network interface for DDS (ignored in simulation mode)')
+    parser.add_argument('--port', type=int, default=8012, help='Vuer server port (default: 8012)')
     # mode flags
     parser.add_argument('--motion', action = 'store_true', help = 'Enable motion control mode')
     parser.add_argument('--headless', action='store_true', help='Enable headless mode (no display)')
@@ -112,12 +113,15 @@ if __name__ == '__main__':
     logger_mp.info(f"args: {args}")
 
     try:
-        def filter_states_actions_by_side(states, actions, record_side):
+        def filter_states_actions_by_side(states, actions, record_side, torques=None):
+            if torques is None:
+                torques = {}
             if record_side == "both":
-                return states, actions
+                return states, actions, torques
             keep_prefix = "left" if record_side == "left" else "right"
             filtered_states = {key: value for key, value in states.items() if key.startswith(keep_prefix)}
             filtered_actions = {key: value for key, value in actions.items() if key.startswith(keep_prefix)}
+            filtered_torques = {key: value for key, value in torques.items() if key.startswith(keep_prefix)}
 
             # keep non-side specific entries such as body
             for key, value in states.items():
@@ -126,7 +130,10 @@ if __name__ == '__main__':
             for key, value in actions.items():
                 if not key.startswith(("left_", "right_")):
                     filtered_actions[key] = value
-            return filtered_states, filtered_actions
+            for key, value in torques.items():
+                if not key.startswith(("left_", "right_")):
+                    filtered_torques[key] = value
+            return filtered_states, filtered_actions, filtered_torques
 
         # ipc communication. client usage: see utils/ipc.py
         if args.ipc:
@@ -178,9 +185,9 @@ if __name__ == '__main__':
                 # Mixed wrist cameras:
                 # - OpenCV uses /dev/video index (int) or "/dev/videoX" (string)
                 # - RealSense uses serial number (string)
-                'wrist_camera_type': ['realsense', 'realsense'],
-                'wrist_camera_image_shape': [480, 640],
-                'wrist_camera_id_numbers': ["323622271193", "335122271374"],
+                # 'wrist_camera_type': ['realsense', 'realsense'],
+                # 'wrist_camera_image_shape': [480, 640],
+                # 'wrist_camera_id_numbers': ["323622271193", "335122271374"],
             }  
 
 
@@ -236,7 +243,7 @@ if __name__ == '__main__':
 
         # television: obtain hand pose data from the XR device and transmit the robot's head camera image to the XR device.
         tv_wrapper = TeleVuerWrapper(binocular=BINOCULAR, use_hand_tracking=args.xr_mode == "hand", img_shape=tv_img_shape, img_shm_name=tv_img_shm.name, 
-                                     return_state_data=True, return_hand_rot_data = False)
+                                     return_state_data=True, return_hand_rot_data = False, port=args.port)
         
         
 
@@ -380,6 +387,9 @@ if __name__ == '__main__':
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = False)
         elif args.record and not args.headless:
             recorder = EpisodeWriter(task_dir = args.task_dir + args.task_name, task_goal = args.task_desc, frequency = args.frequency, rerun_log = True)
+        if args.record and args.xr_mode == "controller":
+            recorder.info["joint_names"]["left_trig"] = ["left_trig"]
+            recorder.info["joint_names"]["right_trig"] = ["right_trig"]
         if args.record:
             logger_mp.info(f"Recording side: {args.record_side}")
 
@@ -489,6 +499,18 @@ if __name__ == '__main__':
                 sport_client.Move(-tele_data.tele_state.left_thumbstick_value[1]  * 0.3,
                                   -tele_data.tele_state.left_thumbstick_value[0]  * 0.3,
                                   -tele_data.tele_state.right_thumbstick_value[0] * 0.3)
+
+            # waist yaw control with left A and B buttons (for controller mode)
+            if args.xr_mode == "controller":
+                waist_rotation_speed = 0.01  # radians per frame (adjust for slower/faster rotation)
+                if tele_data.tele_state.left_aButton:
+                    # A button (left controller): rotate waist yaw to the right
+                    arm_ctrl.ctrl_waist_yaw(waist_rotation_speed)
+                    logger_mp.debug(f"Waist yaw right: {arm_ctrl.get_waist_yaw_target():.3f}")
+                elif tele_data.tele_state.left_bButton:
+                    # B button (left controller): rotate waist yaw to the left
+                    arm_ctrl.ctrl_waist_yaw(-waist_rotation_speed)
+                    logger_mp.debug(f"Waist yaw left: {arm_ctrl.get_waist_yaw_target():.3f}")
 
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
@@ -885,6 +907,9 @@ if __name__ == '__main__':
                     right_hand_action = dual_hand_action_array[-7:]
                     current_body_state = []
                     current_body_action = []
+                if args.xr_mode == "controller":
+                    left_trigger_action = int(bool(left_trigger))
+                    right_trigger_action = int(bool(right_trigger))
                 # head image
                 current_tv_image = tv_img_array.copy()
                 # wrist image
@@ -966,12 +991,29 @@ if __name__ == '__main__':
                             "qpos": current_body_action,
                         }, 
                     }
-                    states, actions = filter_states_actions_by_side(states, actions, args.record_side)
+                    if args.xr_mode == "controller":
+                        states["left_trig"] = {
+                            "qpos": [left_trigger_action],
+                        }
+                        states["right_trig"] = {
+                            "qpos": [right_trigger_action],
+                        }
+                        actions["left_trig"] = {
+                            "qpos": [left_trigger_action],
+                        }
+                        actions["right_trig"] = {
+                            "qpos": [right_trigger_action],
+                        }
+                    torques = {}
+                    if args.ee == "dex3":
+                        torques["right_ee"] = right_tau.tolist()
+                        torques["left_ee"] = left_tau.tolist()
+                    states, actions, torques = filter_states_actions_by_side(states, actions, args.record_side, torques)
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, sim_state=sim_state)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, torques=torques, sim_state=sim_state)
                     else:
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, torques=torques)
 
             current_time = time.time()
             time_elapsed = current_time - start_time

@@ -100,6 +100,7 @@ class EpisodeReader:
                     "states": fr.get("states") or {},
                     "actions": fr.get("actions") or {},
                     "tactiles": fr.get("tactiles") or {},
+                    "torques": fr.get("torques") or {},
                     "audios": fr.get("audios") or {},
                 }
             )

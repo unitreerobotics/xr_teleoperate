@@ -45,6 +45,23 @@ from unitree_sdk2py.idl.default import unitree_hg_msg_dds__HandCmd_
 # for simulation
 from unitree_sdk2py.core.channel import ChannelPublisher
 from unitree_sdk2py.idl.std_msgs.msg.dds_ import String_
+
+
+def _redirect_cyclonedds_trace_log() -> None:
+    """
+    unitree_sdk2py hardcodes CycloneDDS trace output to /tmp/cdds.LOG when --iface is used.
+    Some environments deny writes to /tmp for this process, so redirect to local writable path.
+    """
+    try:
+        import unitree_sdk2py.core.channel as _dds_channel
+        cfg = getattr(_dds_channel, "ChannelConfigHasInterface", None)
+        if isinstance(cfg, str) and "/tmp/cdds.LOG" in cfg:
+            local_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cdds.LOG")
+            setattr(_dds_channel, "ChannelConfigHasInterface", cfg.replace("/tmp/cdds.LOG", local_log))
+            logger_mp.info(f"[dds] Redirect CycloneDDS trace log to: {local_log}")
+    except Exception as e:
+        logger_mp.warning(f"[dds] Failed to patch CycloneDDS trace log path: {e}")
+
 def publish_reset_category(category: int,publisher): # Scene Reset signal
     msg = String_(data=str(category))
     publisher.Write(msg)
@@ -337,6 +354,7 @@ if __name__ == '__main__':
     parser.add_argument('--arm', type=str, choices=['G1_29', 'G1_23', 'H1_2', 'H1'], default='G1_29', help='Select arm controller')
     parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'inspire1', 'brainco', 'fake_dex'], help='Select end effector controller')
     parser.add_argument('--iface', type=str, default='enx98fc84ec937b', help='Network interface for DDS (ignored in simulation mode)')
+    parser.add_argument('--port', type=int, default=8012, help='Vuer server port (default: 8012)')
     # mode flags
     parser.add_argument('--motion', action = 'store_true', help = 'Enable motion control mode')
     parser.add_argument('--headless', action='store_true', help='Enable headless mode (no display)')
@@ -354,14 +372,21 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     logger_mp.info(f"args: {args}")
+    _redirect_cyclonedds_trace_log()
 
     try:
-        def filter_states_actions_by_side(states, actions, record_side):
+        def filter_states_actions_by_side(states, actions, record_side, tactiles=None, torques=None):
+            if tactiles is None:
+                tactiles = {}
+            if torques is None:
+                torques = {}
             if record_side == "both":
-                return states, actions
+                return states, actions, tactiles, torques
             keep_prefix = "left" if record_side == "left" else "right"
             filtered_states = {key: value for key, value in states.items() if key.startswith(keep_prefix)}
             filtered_actions = {key: value for key, value in actions.items() if key.startswith(keep_prefix)}
+            filtered_tactiles = {key: value for key, value in tactiles.items() if key.startswith(keep_prefix)}
+            filtered_torques = {key: value for key, value in torques.items() if key.startswith(keep_prefix)}
 
             # keep non-side specific entries such as body
             for key, value in states.items():
@@ -370,7 +395,13 @@ if __name__ == '__main__':
             for key, value in actions.items():
                 if not key.startswith(("left_", "right_")):
                     filtered_actions[key] = value
-            return filtered_states, filtered_actions
+            for key, value in tactiles.items():
+                if not key.startswith(("left_", "right_")):
+                    filtered_tactiles[key] = value
+            for key, value in torques.items():
+                if not key.startswith(("left_", "right_")):
+                    filtered_torques[key] = value
+            return filtered_states, filtered_actions, filtered_tactiles, filtered_torques
 
         # multi-task prompts
         TASKS = load_tasks(args.tasks_file, args.tasks, args.task_name, args.task_desc)
@@ -487,7 +518,7 @@ if __name__ == '__main__':
 
         # television: obtain hand pose data from the XR device and transmit the robot's head camera image to the XR device.
         tv_wrapper = TeleVuerWrapper(binocular=BINOCULAR, use_hand_tracking=args.xr_mode == "hand", img_shape=tv_img_shape, img_shm_name=tv_img_shm.name, 
-                                     return_state_data=True, return_hand_rot_data = False)
+                                     return_state_data=True, return_hand_rot_data = False, port=args.port)
         
         
 
@@ -495,6 +526,8 @@ if __name__ == '__main__':
         if args.arm == "G1_29":
             arm_ik = G1_29_ArmIK()
             arm_ctrl = G1_29_ArmController(motion_mode=args.motion, simulation_mode=args.sim, dds_interface=args.iface)
+            from teleop.robot_control.robot_arm import G1_29_JointIndex
+            WAIST_INDICES = [G1_29_JointIndex.kWaistYaw]  # Only record yaw (what we actually control)
         elif args.arm == "G1_23":
             arm_ik = G1_23_ArmIK()
             arm_ctrl = G1_23_ArmController(motion_mode=args.motion, simulation_mode=args.sim, dds_interface=args.iface)
@@ -513,9 +546,9 @@ if __name__ == '__main__':
             dual_hand_state_array = Array('d', 14, lock = False)   # [output] current left, right hand state(14) data.
             dual_hand_action_array = Array('d', 14, lock = False)  # [output] current left, right hand action(14) data.
             right_hand_override = Array('d', 1, lock = True)
-            right_hand_override[0] = 0.0
+            right_hand_override[0] = 1.0  # Start with full control
             left_hand_override = Array('d', 1, lock = True)
-            left_hand_override[0] = 0.0
+            left_hand_override[0] = 1.0  # Start with full control
             hand_ctrl = Dex3_1_Controller(left_hand_pos_array, right_hand_pos_array,
                                           dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, 
                                           simulation_mode=args.sim, right_hand_override=right_hand_override, left_hand_override=left_hand_override,
@@ -561,7 +594,7 @@ if __name__ == '__main__':
             left_press_base  = np.zeros(9, dtype=np.float64)
             press_base_ready = False
             press_base_samples = 0
-            PRESS_BASE_N = 30  # ~1s at 30Hz
+            PRESS_BASE_N = 5
 
             # PER-MOTOR hold tracking (like hand_controller.py)
             right_hold_logged = [False] * 7
@@ -636,6 +669,9 @@ if __name__ == '__main__':
                 frequency=args.frequency,
                 rerun_log=not args.headless,
             )
+            if args.xr_mode == "controller":
+                recorder.info["joint_names"]["left_trig"] = ["left_trig"]
+                recorder.info["joint_names"]["right_trig"] = ["right_trig"]
             apply_task_to_recorder(recorder, initial_task, TASK_IDX, args.task_name)
             logger_mp.info(f"Recording side: {args.record_side}")
 
@@ -649,8 +685,8 @@ if __name__ == '__main__':
         grab_pose_right = np.array([-0.0,-1.0,-1.70,1.55,1.75,1.55,1.75])  # Palmar grip
         grab_pose_left = np.array([0.0,1.0,1.70,-1.55,-1.75,-1.55,-1.75])  # Palmar grip
         open_pose = np.array([0,0,0,0,0,0,0])
-        OPEN_LIMITS_LEFT = np.array([0.00, -0.70, 1.70, 0.00, -1.75, 0.00, -1.75], dtype=float)
-        OPEN_LIMITS_RIGHT = np.array([0.00, 0.70, -1.70, 0.00, 1.75, 0.00, 1.75], dtype=float)
+        scoop_pose_left = np.array([0.00, -0.70, 1.70, 0.00, -1.75, 0.00, -1.75], dtype=float)
+        scoop_pose_right = np.array([0.00, 0.70, -1.70, 0.00, 1.75, 0.00, 1.75], dtype=float)
 
         # --- SmartGrip parameters ---
         KP_MOVE = 1.5
@@ -659,31 +695,33 @@ if __name__ == '__main__':
         KD_HOLD = 0.2
 
         # Hysteresis thresholds (matching hand_controller.py)
-        PRESSURE_THRESHOLD = 0.30              # Higher - to ENTER hold
-        PRESSURE_THRESHOLD_BASE = 0.08         # Base sensor threshold (enter)
-        PRESSURE_THRESHOLD_EXIT = 0.25         # Lower - to EXIT hold (sticky)
-        PRESSURE_THRESHOLD_BASE_EXIT = 0.05    # Base sensor threshold (exit)
-        TORQUE_THRESHOLD_HIGH = 600000.0
+        PRESSURE_THRESHOLD = 0.04              # Higher - to ENTER hold
+        PRESSURE_THRESHOLD_BASE = 0.04         # Base sensor threshold (enter)
+        PRESSURE_THRESHOLD_EXIT = 0.03         # Lower - to EXIT hold (sticky)
+        PRESSURE_THRESHOLD_BASE_EXIT = 0.03    # Base sensor threshold (exit)
+        TORQUE_THRESHOLD_HIGH = 200000.0
         
-        SQUEEZE_OFFSET = 0.10     # matching hand_controller.py
-        RAMP_FACTOR = 0.25        # smooth ramping
+        SQUEEZE_OFFSET = 0.05     # matching hand_controller.py
+        RAMP_FACTOR = 0.30        # smooth ramping
         THUMB_COMPLETION_THRESHOLD = 0.05
         
         # --- Tare (recalibration) tracking ---
-        TARE_DELAY = 0.6  # seconds to wait after trigger release before taring
-        right_trigger_released_time = None
-        left_trigger_released_time = None
+        # Arm tare on trigger press, but execute only when hand reaches fully-open pose.
+        TARE_OPEN_TOL = 0.05
+        right_tare_pending = False
+        left_tare_pending = False
         right_trigger_prev = False
         left_trigger_prev = False
         
-        # Initialize ramped targets from current hand position (prevent jumps)
+        # Initialize ramped targets to grab pose (closed hands) since we start closed
         if args.ee == "dex3":
-            logger_mp.info("Waiting for initial hand state...")
-            time.sleep(0.5)  # Give time for state to arrive
-            with dual_hand_data_lock:
-                right_ramped_target[:] = np.array(dual_hand_state_array[-7:], dtype=np.float64)
-                left_ramped_target[:] = np.array(dual_hand_state_array[:7], dtype=np.float64)
-            # logger_mp.info(f"Initialized ramped targets - Right: {right_ramped_target}, Left: {left_ramped_target}")
+            right_ramped_target[:] = grab_pose_right
+            left_ramped_target[:] = grab_pose_left
+        
+        # Navigation velocity tracking (for recording)
+        nav_vx = 0.0
+        nav_vy = 0.0
+        nav_vyaw = 0.0
         
         loop_idx = 0
         while not STOP:
@@ -740,11 +778,6 @@ if __name__ == '__main__':
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
                 with right_hand_pos_array.get_lock():
                     right_hand_pos_array[:] = tele_data.right_hand_pos.flatten()
-            # elif args.ee == "dex3"  and args.xr_mode == "controller":
-            #     with left_hand_pos_array.get_lock():
-            #         left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
-            #     with right_hand_pos_array.get_lock():
-            #         right_hand_pos_array[:] = tele_data.right_hand_pos.flatten()
             else:
                 pass        
             
@@ -757,14 +790,37 @@ if __name__ == '__main__':
                 # command robot to enter damping mode. soft emergency stop function
                 if tele_data.tele_state.left_thumbstick_state and tele_data.tele_state.right_thumbstick_state:
                     sport_client.Damp()
-                # control, limit velocity to within 0.3
-                sport_client.Move(-tele_data.tele_state.left_thumbstick_value[1]  * 0.3,
-                                  -tele_data.tele_state.left_thumbstick_value[0]  * 0.3,
-                                  -tele_data.tele_state.right_thumbstick_value[0] * 0.3)
+                    nav_vx, nav_vy, nav_vyaw = 0.0, 0.0, 0.0
+                else:
+                    # control, limit velocity to within 0.3
+                    nav_vx = -tele_data.tele_state.left_thumbstick_value[1]  * 0.3
+                    nav_vy = -tele_data.tele_state.left_thumbstick_value[0]  * 0.3
+                    nav_vyaw = -tele_data.tele_state.right_thumbstick_value[0] * 0.3
+                    sport_client.Move(nav_vx, nav_vy, nav_vyaw)
+            else:
+                # No motion control - velocities are zero
+                nav_vx, nav_vy, nav_vyaw = 0.0, 0.0, 0.0
+
+            # waist yaw control with A and B buttons (for controller mode)
+            if args.xr_mode == "controller":
+                waist_rotation_speed = 0.01  # radians per frame (adjust for slower/faster rotation)
+                if tele_data.tele_state.left_aButton:
+                    # A button (left controller): rotate waist yaw to the right
+                    arm_ctrl.ctrl_waist_yaw(waist_rotation_speed)
+                    logger_mp.debug(f"Waist yaw right: {arm_ctrl.get_waist_yaw_target():.3f}")
+                elif tele_data.tele_state.left_bButton:
+                    # B button (left controller): rotate waist yaw to the left
+                    arm_ctrl.ctrl_waist_yaw(-waist_rotation_speed)
+                    logger_mp.debug(f"Waist yaw left: {arm_ctrl.get_waist_yaw_target():.3f}")
+                elif tele_data.tele_state.left_squeeze_ctrl_state:
+                    # Grip button (left controller): gradually reset waist yaw to zero
+                    arm_ctrl.reset_waist_yaw()
+                    logger_mp.debug(f"Waist yaw resetting to zero: {arm_ctrl.get_waist_yaw_target():.3f}")
 
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
             current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
+            current_full_motor_q = arm_ctrl.get_current_motor_q()  # For waist data
 
             # solve ik using motor data and wrist pose, then use ik results to control arms.
             time_ik_start = time.time()
@@ -776,19 +832,18 @@ if __name__ == '__main__':
             right_trigger = tele_data.tele_state.right_trigger_state
             left_trigger = tele_data.tele_state.left_trigger_state
             
-            # --- Detect trigger release and schedule tare ---
-            current_loop_time = time.time()
+            # --- Detect trigger press and arm tare ---
             
-            # Right hand: detect falling edge (was pressed, now released)
-            if right_trigger_prev and not right_trigger:
-                right_trigger_released_time = current_loop_time
-                # logger_mp.info("[TARE] Right trigger released, will tare after delay...")
+            # Right hand: detect rising edge (was not pressed, now pressed)
+            if not right_trigger_prev and right_trigger:
+                right_tare_pending = True
+                logger_mp.info("[TARE] Right trigger pressed, waiting for fully-open hand to tare...")
             right_trigger_prev = right_trigger
             
-            # Left hand: detect falling edge
-            if left_trigger_prev and not left_trigger:
-                left_trigger_released_time = current_loop_time
-                # logger_mp.info("[TARE] Left trigger released, will tare after delay...")
+            # Left hand: detect rising edge (was not pressed, now pressed)
+            if not left_trigger_prev and left_trigger:
+                left_tare_pending = True
+                logger_mp.info("[TARE] Left trigger pressed, waiting for fully-open hand to tare...")
             left_trigger_prev = left_trigger
 
             # --- Read Dex3 state (tau_est + pressure) ---
@@ -837,18 +892,19 @@ if __name__ == '__main__':
                     # if state not available (sim / DDS hiccup), just keep last values
                     pass
                 
-                # --- Execute tare if delay has passed ---
-                if right_trigger_released_time is not None:
-                    if (current_loop_time - right_trigger_released_time) >= TARE_DELAY:
-                        right_press_base = right_press.copy()
-                        # logger_mp.info(f"[TARE] Right hand recalibrated! New baseline max: {np.max(right_press_base):.1f}")
-                        right_trigger_released_time = None
-                
-                if left_trigger_released_time is not None:
-                    if (current_loop_time - left_trigger_released_time) >= TARE_DELAY:
-                        left_press_base = left_press.copy()
-                        # logger_mp.info(f"[TARE] Left hand recalibrated! New baseline max: {np.max(left_press_base):.1f}")
-                        left_trigger_released_time = None
+                # --- Execute tare only when trigger is held and hand is fully open ---
+                right_is_fully_open = np.max(np.abs(right_ramped_target - open_pose)) <= TARE_OPEN_TOL
+                left_is_fully_open = np.max(np.abs(left_ramped_target - open_pose)) <= TARE_OPEN_TOL
+
+                if right_tare_pending and right_trigger and right_is_fully_open:
+                    right_press_base = right_press.copy()
+                    right_tare_pending = False
+                    logger_mp.debug("[TARE] Right hand recalibrated at fully-open pose.")
+
+                if left_tare_pending and left_trigger and left_is_fully_open:
+                    left_press_base = left_press.copy()
+                    left_tare_pending = False
+                    logger_mp.debug("[TARE] Left hand recalibrated at fully-open pose.")
 
                 # baseline-correct and normalize (divide by 100.0 like hand_controller.py)
                 PRESSURE_SCALE = 100.0
@@ -859,30 +915,20 @@ if __name__ == '__main__':
                     right_press_corr = right_press / PRESSURE_SCALE
                     left_press_corr  = left_press / PRESSURE_SCALE
 
-                # # --- DEBUG: print pressure and torque after calibration ---
-                # if press_base_ready:
-                #     if (loop_idx % args.frequency) == 0:   # ~1 Hz print
-                #         print(
-                #             f"[HAND DEBUG] "
-                #             f"R_press_max={float(np.max(right_press_corr)):.3f} | "
-                #             f"L_press_max={float(np.max(left_press_corr)):.3f} | "
-                #             f"R_tau_max={float(np.max(np.abs(right_tau))):.3f} | "
-                #             f"L_tau_max={float(np.max(np.abs(left_tau))):.3f}"
-                #         )
-                # loop_idx += 1
-            
-
+                loop_idx += 1
 
             if args.ee == "fake_dex":
                 fake_q14 = np.zeros(14,dtype=np.float64)
 
                 if left_trigger:
-                    fake_q14[:7] = grab_pose_left
-                else:
                     fake_q14[:7] = open_pose
+                else:
+                    fake_q14[:7] = grab_pose_left
 
-
-                fake_q14[-7:] = grab_pose_right
+                if right_trigger:
+                    fake_q14[-7:] = open_pose
+                else:
+                    fake_q14[-7:] = grab_pose_right
 
                 with dual_hand_data_lock:
                     dual_hand_action_array[:] = fake_q14
@@ -917,13 +963,26 @@ if __name__ == '__main__':
                 left_middle_tip = left_press_corr[3]
                 left_middle_base = left_press_corr[2]
 
+                # --- DEBUG: print finger-specific pressures and torques ---
+                # if press_base_ready and loop_idx % 1 == 0:  # Print every loop
+                #     logger_mp.info(
+                #         f"[HAND DEBUG] RIGHT: thumb_b={right_thumb_base:.3f} thumb_t={right_thumb_tip:.3f} "
+                #         f"idx_b={right_index_base:.3f} idx_t={right_index_tip:.3f} mid_b={right_middle_base:.3f} mid_t={right_middle_tip:.3f} | "
+                #         f"tau_max={float(np.max(np.abs(right_tau))):.0f}"
+                #     )
+                #     logger_mp.info(
+                #         f"[HAND DEBUG] LEFT: thumb_b={left_thumb_base:.3f} thumb_t={left_thumb_tip:.3f} "
+                #         f"idx_b={left_index_base:.3f} idx_t={left_index_tip:.3f} mid_b={left_middle_base:.3f} mid_t={left_middle_tip:.3f} | "
+                #         f"tau_max={float(np.max(np.abs(left_tau))):.0f}"
+                #     )
+
                 # ---------------- RIGHT hand (per-motor SmartGrip) ----------------
-                if right_trigger:
+                if not right_trigger:
                     # take ownership while gripping
                     with right_hand_override.get_lock():
                         right_hand_override[0] = 1.0
 
-                    # User is gripping - use palmar target with PER-MOTOR contact detection
+                    # User is gripping - use grab target with SmartGrip
                     target_pose = grab_pose_right
                     with dual_hand_data_lock:
                         current_pos = np.array(dual_hand_state_array[-7:], dtype=np.float64)
@@ -1024,15 +1083,17 @@ if __name__ == '__main__':
                     q14[-7:] = right_ramped_target
                     
                 else:
-                    # Trigger released - open hand instantly (no ramping)
+                    # Trigger pressed - open hand with ramping
                     with right_hand_override.get_lock():
-                        right_hand_override[0] = 0.0
+                        right_hand_override[0] = 1.0
 
                     for i, jid in enumerate(Dex3_1_Right_JointIndex):
-                        # Direct open - no ramping for faster release
-                        right_ramped_target[i] = open_pose[i]
+                        # Open smoothly with ramping
+                        final_target = open_pose[i]
+                        new_ramped = right_ramped_target[i] + (final_target - right_ramped_target[i]) * RAMP_FACTOR
+                        right_ramped_target[i] = new_ramped
                         
-                        dex3_right_msg.motor_cmd[jid].q = open_pose[i]
+                        dex3_right_msg.motor_cmd[jid].q = right_ramped_target[i]
                         dex3_right_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_right_msg.motor_cmd[jid].kd = KD_MOVE
                         right_hold_logged[i] = False
@@ -1040,11 +1101,11 @@ if __name__ == '__main__':
                     q14[-7:] = right_ramped_target
 
                 # ---------------- LEFT hand (per-motor SmartGrip) ----------------
-                if left_trigger:
+                if not left_trigger:
                     with left_hand_override.get_lock():
                         left_hand_override[0] = 1.0
 
-                    # User is gripping - use palmar target with PER-MOTOR contact detection
+                    # User is gripping - use grab target with SmartGrip
                     target_pose = grab_pose_left
                     with dual_hand_data_lock:
                         current_pos = np.array(dual_hand_state_array[:7], dtype=np.float64)
@@ -1142,20 +1203,20 @@ if __name__ == '__main__':
                             left_hold_logged[i] = False
                     
                     # Update q14 for recording
-                    q14[:7] = left_ramped_target
-                    
-                    
+                    q14[:7] = left_ramped_target                    
 
                 else:
-                    # Trigger released - open hand instantly (no ramping)
+                    # Trigger pressed - open hand with ramping
                     with left_hand_override.get_lock():
-                        left_hand_override[0] = 0.0
+                        left_hand_override[0] = 1.0
 
                     for i, jid in enumerate(Dex3_1_Left_JointIndex):
-                        # Direct open - no ramping for faster release
-                        left_ramped_target[i] = open_pose[i]
+                        # Open smoothly with ramping
+                        final_target = open_pose[i]
+                        new_ramped = left_ramped_target[i] + (final_target - left_ramped_target[i]) * RAMP_FACTOR
+                        left_ramped_target[i] = new_ramped
                         
-                        dex3_left_msg.motor_cmd[jid].q = open_pose[i]
+                        dex3_left_msg.motor_cmd[jid].q = left_ramped_target[i]
                         dex3_left_msg.motor_cmd[jid].kp = KP_MOVE
                         dex3_left_msg.motor_cmd[jid].kd = KD_MOVE
                         left_hold_logged[i] = False
@@ -1176,45 +1237,27 @@ if __name__ == '__main__':
             # record data
             if args.record:
                 RECORD_READY = recorder.is_ready()
-                # dex hand or gripper
-                # if args.ee == "dex3" and args.xr_mode == "hand":
-                #     with dual_hand_data_lock:
-                #         left_ee_state = dual_hand_state_array[:7]
-                #         right_ee_state = dual_hand_state_array[-7:]
-                #         left_hand_action = dual_hand_action_array[:7]
-                #         right_hand_action = dual_hand_action_array[-7:]
-                #         current_body_state = []
-                #         current_body_action = []
-                # if args.ee == "dex3" and args.xr_mode == "controller":
-                #     with dual_hand_data_lock:
-                #         left_ee_state = dual_hand_state_array[:7]
-                #         right_ee_state = dual_hand_state_array[-7:]
-                #         left_hand_action = dual_hand_action_array[:7]
-                #         right_hand_action = dual_hand_action_array[-7:]
-                #         current_body_state = []
-                #         current_body_action = []
-                # elif (args.ee == "inspire1" or args.ee == "brainco") and args.xr_mode == "hand":
-                #     with dual_hand_data_lock:
-                #         left_ee_state = dual_hand_state_array[:6]
-                #         right_ee_state = dual_hand_state_array[-6:]
-                #         left_hand_action = dual_hand_action_array[:6]
-                #         right_hand_action = dual_hand_action_array[-6:]
-                #         current_body_state = []
-                #         current_body_action = []
-                # else:
-                #     left_ee_state = []
-                #     right_ee_state = []
-                #     left_hand_action = []
-                #     right_hand_action = []
-                #     current_body_state = []
-                #     current_body_action = []
                 with dual_hand_data_lock:
                     left_ee_state = dual_hand_state_array[:7]
                     right_ee_state = dual_hand_state_array[-7:]
                     left_hand_action = dual_hand_action_array[:7]
                     right_hand_action = dual_hand_action_array[-7:]
-                    current_body_state = []
-                    current_body_action = []
+                if args.xr_mode == "controller":
+                    left_trigger_action = int(bool(left_trigger))
+                    right_trigger_action = int(bool(right_trigger))
+
+                # waist state and action (only yaw - what we actually control)
+                if WAIST_INDICES:
+                    current_waist_state = [float(current_full_motor_q[WAIST_INDICES[0]])]
+                    waist_yaw_target = arm_ctrl.get_waist_yaw_target()
+                    if waist_yaw_target is not None:
+                        current_waist_action = [waist_yaw_target]
+                    else:
+                        current_waist_action = current_waist_state.copy()
+                else:
+                    current_waist_state = []
+                    current_waist_action = []
+        
                 # head image
                 current_tv_image = tv_img_array.copy()
                 # wrist image
@@ -1267,8 +1310,13 @@ if __name__ == '__main__':
                             "qvel":   [],                           
                             "torque": [],  
                         }, 
-                        "body": {
-                            "qpos": current_body_state,
+                        "waist": {
+                            "qpos": current_waist_state,
+                            "qvel": [], 
+                        },
+                        "base": {
+                            "qpos": [],  
+                            "qvel": [], 
                         }, 
                     }
                     actions = {
@@ -1292,16 +1340,49 @@ if __name__ == '__main__':
                             "qvel":   [],       
                             "torque": [], 
                         }, 
-                        "body": {
-                            "qpos": current_body_action,
+                         "waist": {
+                            "qpos": current_waist_action,
+                            "qvel": [],
+                        },
+                        "base": {
+                            "qpos": [],
+                            "qvel": [nav_vx, nav_vy, nav_vyaw], 
                         }, 
                     }
-                    states, actions = filter_states_actions_by_side(states, actions, args.record_side)
+                    if args.xr_mode == "controller":
+                        states["left_trig"] = {
+                            "qpos": [left_trigger_action],
+                        }
+                        states["right_trig"] = {
+                            "qpos": [right_trigger_action],
+                        }
+                        actions["left_trig"] = {
+                            "qpos": [left_trigger_action],
+                        }
+                        actions["right_trig"] = {
+                            "qpos": [right_trigger_action],
+                        }
+                    # Hand pressures (tactiles) if available
+                    tactiles = {}
+                    if args.ee == "dex3":
+                        if "right_press_corr" in locals(): # Defensive approach
+                            tactiles["right_ee"] = right_press_corr.tolist()
+                        if "left_press_corr" in locals(): # Defensive approach
+                            tactiles["left_ee"] = left_press_corr.tolist()
+                    torques = {}
+                    if args.ee == "dex3":
+                        if "right_tau" in locals():
+                            torques["right_ee"] = right_tau.tolist()
+                        if "left_tau" in locals():
+                            torques["left_ee"] = left_tau.tolist()
+                    states, actions, tactiles, torques = filter_states_actions_by_side(
+                        states, actions, args.record_side, tactiles, torques
+                    )
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, sim_state=sim_state)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, tactiles=tactiles, torques=torques, sim_state=sim_state)
                     else:
-                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions)
+                        recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, tactiles=tactiles, torques=torques)
 
             current_time = time.time()
             time_elapsed = current_time - start_time
@@ -1311,8 +1392,15 @@ if __name__ == '__main__':
 
     except KeyboardInterrupt:
         logger_mp.info("KeyboardInterrupt, exiting program...")
+    except Exception as e:
+        logger_mp.error(f"Exception occurred: {type(e).__name__}: {e}")
+        import traceback
+        logger_mp.error(traceback.format_exc())
     finally:
-        #arm_ctrl.ctrl_dual_arm_go_home()
+        try:
+            arm_ctrl.ctrl_dual_arm_go_rest()
+        except Exception as e:
+            logger_mp.warning(f"Failed to move arm to rest on exit: {e}")
 
         try:
             if args.ipc:
