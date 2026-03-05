@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
 """
-Split each episode in a Unitree-style dataset into 5 yaw-based sub-episodes.
+Split each episode into two sub-datasets using waist/arm yaw motion:
+  - pick:  align + pick + rotate
+  - place: place + rotate-back
 
 Output layout:
   <dst>/
-    align/episode_XXXX/...
     pick/episode_XXXX/...
-    rotate/episode_XXXX/...
     place/episode_XXXX/...
-    return/episode_XXXX/...
 
-Sub-episode definitions (using yaw moving/stopped states):
-  1) beginning -> first stopped frame
-  2) first stopped segment -> first moving frame
-  3) moving segment -> next stopped frame
-  4) stopped segment -> next moving frame
-  5) moving segment -> end
+Cut frame is detected as the first stable stopped segment after the main
+"pick->rotate" moving segment, i.e. the start of "place".
 """
 
 from __future__ import annotations
@@ -231,13 +226,70 @@ def first_index_with_state(flags: List[bool], start: int, target: bool) -> int:
     return len(flags)
 
 
-def compute_sub_ranges(flags: List[bool]) -> List[Tuple[int, int]]:
+def bool_runs(flags: List[bool]) -> List[Tuple[int, int, bool]]:
+    runs: List[Tuple[int, int, bool]] = []
     n = len(flags)
+    i = 0
+    while i < n:
+        state = flags[i]
+        j = i + 1
+        while j < n and flags[j] == state:
+            j += 1
+        runs.append((i, j, state))
+        i = j
+    return runs
+
+
+def detect_pick_place_cut(
+    flags: List[bool],
+    min_stopped_frames: int,
+    min_moving_frames: int,
+) -> int:
+    """
+    Return cut frame index where:
+      [optional align moving] -> pick(stopped) -> rotate(moving) -> place(stopped)
+
+    If stable segments are not found, fallback to basic state transitions.
+    """
+    n = len(flags)
+    if n == 0:
+        return 0
+
+    runs = bool_runs(flags)
+
+    # Find first stable stopped run (pick).
+    pick_run_idx: Optional[int] = None
+    for ri, (start, end, state) in enumerate(runs):
+        if (not state) and (end - start >= min_stopped_frames):
+            pick_run_idx = ri
+            break
+
+    # Find first stable moving run after pick (rotate).
+    rotate_run_idx: Optional[int] = None
+    if pick_run_idx is not None:
+        for ri in range(pick_run_idx + 1, len(runs)):
+            start, end, state = runs[ri]
+            if state and (end - start >= min_moving_frames):
+                rotate_run_idx = ri
+                break
+
+    # Find first stable stopped run after rotate (place start = cut frame).
+    if rotate_run_idx is not None:
+        for ri in range(rotate_run_idx + 1, len(runs)):
+            start, end, state = runs[ri]
+            if (not state) and (end - start >= min_stopped_frames):
+                return start
+
+    # Fallback to the original boundary logic: first stopped after first moving
+    # after initial stopped.
     i1 = first_index_with_state(flags, 0, False)
     i2 = first_index_with_state(flags, i1, True)
     i3 = first_index_with_state(flags, i2, False)
-    i4 = first_index_with_state(flags, i3, True)
-    return [(0, i1), (i1, i2), (i2, i3), (i3, i4), (i4, n)]
+    if i3 < n:
+        return i3
+
+    # Last fallback: split in the middle.
+    return n // 2
 
 
 def collect_refs_from_frame(frame: Dict[str, Any]) -> List[str]:
@@ -288,7 +340,9 @@ def write_sub_episode(
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Split dataset episodes into 5 yaw-defined sub-episodes.")
+    ap = argparse.ArgumentParser(
+        description="Split dataset episodes into pick(place) halves using yaw-defined cut frame."
+    )
     ap.add_argument("--src", required=True, help="Source dataset directory containing episode_XXXX folders")
     ap.add_argument(
         "--dst",
@@ -303,8 +357,20 @@ def main() -> None:
     ap.add_argument(
         "--min-state-frames",
         type=int,
-        default=1,
+        default=3,
         help="Smooth short moving/stopped runs shorter than this length (>=1)",
+    )
+    ap.add_argument(
+        "--min-stopped-frames",
+        type=int,
+        default=20,
+        help="Minimum frames for a stopped run to be considered stable (>=1)",
+    )
+    ap.add_argument(
+        "--min-moving-frames",
+        type=int,
+        default=20,
+        help="Minimum frames for a moving run to be considered stable (>=1)",
     )
     ap.add_argument("--keep-idx", action="store_true", help="Keep original frame idx; default reindexes per sub-episode")
     ap.add_argument("--dry-run", action="store_true", help="Only print planned ranges; do not write output")
@@ -331,8 +397,14 @@ def main() -> None:
     if args.min_state_frames < 1:
         eprint("--min-state-frames must be >= 1")
         sys.exit(2)
+    if args.min_stopped_frames < 1:
+        eprint("--min-stopped-frames must be >= 1")
+        sys.exit(2)
+    if args.min_moving_frames < 1:
+        eprint("--min-moving-frames must be >= 1")
+        sys.exit(2)
 
-    sub_names = ["align", "pick", "rotate", "place", "return"]
+    sub_names = ["pick", "place"]
     sub_roots = [dst / name for name in sub_names]
 
     if args.dry_run:
@@ -349,6 +421,10 @@ def main() -> None:
     print(
         "Yaw detection: "
         f"source={args.yaw_source}, threshold={args.yaw_threshold}, min_state_frames={args.min_state_frames}"
+    )
+    print(
+        "Cut detection: "
+        f"min_stopped_frames={args.min_stopped_frames}, min_moving_frames={args.min_moving_frames}"
     )
     if args.yaw_group is not None:
         print(
@@ -390,20 +466,26 @@ def main() -> None:
 
             flags = moving_flags_from_yaw(yaw_values, args.yaw_threshold)
             flags = smooth_short_runs(flags, args.min_state_frames)
-            ranges = compute_sub_ranges(flags)
+            cut_idx = detect_pick_place_cut(
+                flags=flags,
+                min_stopped_frames=args.min_stopped_frames,
+                min_moving_frames=args.min_moving_frames,
+            )
         except Exception as exc:
             eprint(f"Skipping {ep_dir.name}: {exc}")
             continue
 
-        cut_frames = [ranges[0][1], ranges[1][1], ranges[2][1], ranges[3][1]]
+        n_frames = len(frames)
+        cut_idx = max(1, min(cut_idx, n_frames - 1))
         print(
             f"{ep_dir.name} | yaw={yaw_group}[{yaw_joint_idx}] '{yaw_joint_name}' | "
-            f"cut_frames={cut_frames}"
+            f"cut_frame={cut_idx} (pick:0-{cut_idx - 1}, place:{cut_idx}-{n_frames - 1})"
         )
 
         if args.dry_run:
             continue
 
+        ranges = [(0, cut_idx), (cut_idx, n_frames)]
         for i, (start, end) in enumerate(ranges, start=1):
             out_ep_dir = sub_roots[i - 1] / ep_dir.name
             sliced_frames = frames[start:end]
