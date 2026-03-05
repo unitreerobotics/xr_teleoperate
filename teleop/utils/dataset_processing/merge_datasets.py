@@ -115,8 +115,8 @@ def main() -> int:
     if args.padding < 1:
         eprint("Error: --padding must be >= 1")
         return 2
-    if args.start_index < 1:
-        eprint("Error: --start-index must be >= 1")
+    if args.start_index < 0:
+        eprint("Error: --start-index must be >= 0")
         return 2
 
     merged_sources: List[Path] = []
