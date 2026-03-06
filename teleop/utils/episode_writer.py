@@ -1,4 +1,6 @@
 import os
+import re
+import shutil
 import cv2
 import json
 import datetime
@@ -37,9 +39,7 @@ class EpisodeWriter():
         self.item_id = -1
         self.episode_id = -1
         if os.path.exists(self.task_dir):
-            episode_dirs = [episode_dir for episode_dir in os.listdir(self.task_dir) if 'episode_' in episode_dir]
-            episode_last = sorted(episode_dirs)[-1] if len(episode_dirs) > 0 else None
-            self.episode_id = 0 if episode_last is None else int(episode_last.split('_')[-1])
+            self.episode_id = self._find_latest_episode_id()
             logger_mp.info(f"==> task_dir directory already exist, now self.episode_id is:{self.episode_id}\n")
         else:
             os.makedirs(self.task_dir)
@@ -55,6 +55,18 @@ class EpisodeWriter():
         self.worker_thread.start()
 
         logger_mp.info("==> EpisodeWriter initialized successfully.\n")
+
+    def _find_latest_episode_id(self):
+        max_episode_id = 0
+        episode_pattern = re.compile(r"^episode_(\d+)$")
+        for root, dirs, _ in os.walk(self.task_dir):
+            for dir_name in dirs:
+                match = episode_pattern.match(dir_name)
+                if match:
+                    episode_id = int(match.group(1))
+                    if episode_id > max_episode_id:
+                        max_episode_id = episode_id
+        return max_episode_id
     
     def is_ready(self):
         return self.is_available
@@ -107,6 +119,8 @@ class EpisodeWriter():
         # Reset episode-related data and create necessary directories
         self.item_id = -1
         self.episode_id = self.episode_id + 1
+        self.episode_reward = "unknown"
+        self.episode_subdir = None
         
         self.episode_dir = os.path.join(self.task_dir, f"episode_{str(self.episode_id).zfill(4)}")
         self.color_dir = os.path.join(self.episode_dir, 'colors')
@@ -208,10 +222,14 @@ class EpisodeWriter():
             logger_mp.info(f"==> episode_id:{self.episode_id}  item_id:{idx}  current_time:{curent_record_time}")
             self.rerun_logger.log_item_data(item_data)
 
-    def save_episode(self):
+    def save_episode(self, reward=None, episode_subdir=None):
         """
         Trigger the save operation. This sets the save flag, and the process_queue thread will handle it.
         """
+        if reward is not None:
+            self.episode_reward = reward
+        if episode_subdir is not None:
+            self.episode_subdir = episode_subdir
         self.need_save = True  # Set the save flag
         logger_mp.info(f"==> Episode saved start...")
 
@@ -220,11 +238,22 @@ class EpisodeWriter():
         Save the episode data to a JSON file.
         """
         with open(self.json_path, "a", encoding="utf-8") as f:
-            f.write("\n]\n}")      # Close the JSON array and object
+            f.write("\n],\n")
+            f.write('"reward": ' + json.dumps(self.episode_reward, ensure_ascii=False, indent=4) + "\n")
+            f.write("}")      # Close the JSON object
 
         self.need_save = False     # Reset the save flag
         self.is_available = True   # Mark the class as available after saving
-        logger_mp.info(f"==> Episode saved successfully to {self.json_path}.")
+        saved_episode_dir = self.episode_dir
+        if self.episode_subdir:
+            target_root = os.path.join(self.task_dir, self.episode_subdir)
+            os.makedirs(target_root, exist_ok=True)
+            target_episode_dir = os.path.join(target_root, os.path.basename(self.episode_dir))
+            shutil.move(self.episode_dir, target_episode_dir)
+            saved_episode_dir = target_episode_dir
+            self.episode_dir = target_episode_dir
+            self.json_path = os.path.join(self.episode_dir, 'data.json')
+        logger_mp.info(f"==> Episode saved successfully to {saved_episode_dir}.")
 
     def close(self):
         """
