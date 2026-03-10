@@ -119,7 +119,6 @@ class EpisodeWriter():
         # Reset episode-related data and create necessary directories
         self.item_id = -1
         self.episode_id = self.episode_id + 1
-        self.episode_reward = "unknown"
         self.episode_subdir = None
         
         self.episode_dir = os.path.join(self.task_dir, f"episode_{str(self.episode_id).zfill(4)}")
@@ -222,12 +221,10 @@ class EpisodeWriter():
             logger_mp.info(f"==> episode_id:{self.episode_id}  item_id:{idx}  current_time:{curent_record_time}")
             self.rerun_logger.log_item_data(item_data)
 
-    def save_episode(self, reward=None, episode_subdir=None):
+    def save_episode(self, episode_subdir=None):
         """
         Trigger the save operation. This sets the save flag, and the process_queue thread will handle it.
         """
-        if reward is not None:
-            self.episode_reward = reward
         if episode_subdir is not None:
             self.episode_subdir = episode_subdir
         self.need_save = True  # Set the save flag
@@ -239,7 +236,7 @@ class EpisodeWriter():
         """
         with open(self.json_path, "a", encoding="utf-8") as f:
             f.write("\n],\n")
-            f.write('"reward": ' + json.dumps(self.episode_reward, ensure_ascii=False, indent=4) + "\n")
+            f.write('"rewards": ' + json.dumps({"success": True}, ensure_ascii=False, indent=4) + "\n")
             f.write("}")      # Close the JSON object
 
         self.need_save = False     # Reset the save flag
