@@ -119,6 +119,7 @@ class EpisodeWriter():
         # Reset episode-related data and create necessary directories
         self.item_id = -1
         self.episode_id = self.episode_id + 1
+        self.episode_success = True
         self.episode_subdir = None
         
         self.episode_dir = os.path.join(self.task_dir, f"episode_{str(self.episode_id).zfill(4)}")
@@ -227,6 +228,7 @@ class EpisodeWriter():
         """
         if episode_subdir is not None:
             self.episode_subdir = episode_subdir
+            self.episode_success = episode_subdir != "bad"
         self.need_save = True  # Set the save flag
         logger_mp.info(f"==> Episode saved start...")
 
@@ -236,7 +238,7 @@ class EpisodeWriter():
         """
         with open(self.json_path, "a", encoding="utf-8") as f:
             f.write("\n],\n")
-            f.write('"rewards": ' + json.dumps({"success": True}, ensure_ascii=False, indent=4) + "\n")
+            f.write('"rewards": ' + json.dumps({"success": self.episode_success}, ensure_ascii=False, indent=4) + "\n")
             f.write("}")      # Close the JSON object
 
         self.need_save = False     # Reset the save flag
