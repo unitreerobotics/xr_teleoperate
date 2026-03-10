@@ -44,19 +44,33 @@ STOP           = False  # Enable to begin system exit procedure
 RECORD_TOGGLE  = False  # [Ready] ⇄ [Recording] ⟶ [AutoSave] ⟶ [Ready]         (⇄ manual) (⟶ auto)
 RECORD_RUNNING = False  # True if [Recording]
 RECORD_READY   = True   # True if [Ready], False if [Recording] / [AutoSave]
+RECORD_STOP_META = None # {"subfolder": str} when stopping
 # task info
 TASK_NAME = None
 TASK_DESC = None
 ITEM_ID = None
 def on_press(key):
-    global STOP, START, RECORD_TOGGLE
+    global STOP, START, RECORD_TOGGLE, RECORD_STOP_META, RECORD_RUNNING
     if key == 'r':
         START = True
     elif key == 'q':
         START = False
         STOP = True
-    elif key == 's' and START == True:
-        RECORD_TOGGLE = True
+    elif START == True and key in ('s', 'f', 'e'):
+        if not RECORD_RUNNING:
+            if key == 's':
+                RECORD_STOP_META = None
+                RECORD_TOGGLE = True
+            else:
+                logger_mp.warning(f"[on_press] {key} only works while recording.")
+        else:
+            if key == 's':
+                RECORD_STOP_META = {"subfolder": "good"}
+            elif key == 'f':
+                RECORD_STOP_META = {"subfolder": "bad"}
+            elif key == 'e':
+                RECORD_STOP_META = {"subfolder": "review"}
+            RECORD_TOGGLE = True
     else:
         logger_mp.warning(f"[on_press] {key} was pressed, but no action is defined for this key.")
 
@@ -282,7 +296,20 @@ if __name__ == '__main__':
                     if args.sim:
                         publish_reset_category(2, reset_pose_publisher)
                 elif key == ord('s'):
-                    RECORD_TOGGLE = True
+                    if not RECORD_RUNNING:
+                        RECORD_STOP_META = None
+                        RECORD_TOGGLE = True
+                    else:
+                        RECORD_STOP_META = {"subfolder": "good"}
+                        RECORD_TOGGLE = True
+                elif key == ord('f'):
+                    if RECORD_RUNNING:
+                        RECORD_STOP_META = {"subfolder": "bad"}
+                        RECORD_TOGGLE = True
+                elif key == ord('e'):
+                    if RECORD_RUNNING:
+                        RECORD_STOP_META = {"subfolder": "review"}
+                        RECORD_TOGGLE = True
                 elif key == ord('a'):
                     if args.sim:
                         publish_reset_category(2, reset_pose_publisher)
@@ -296,7 +323,9 @@ if __name__ == '__main__':
                         logger_mp.error("Failed to create episode. Recording not started.")
                 else:
                     RECORD_RUNNING = False
-                    recorder.save_episode()
+                    stop_meta = RECORD_STOP_META or {"subfolder": "good"}
+                    recorder.save_episode(episode_subdir=stop_meta["subfolder"])
+                    RECORD_STOP_META = None
                     if args.sim:
                         publish_reset_category(1, reset_pose_publisher)
 
