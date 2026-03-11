@@ -524,9 +524,11 @@ if __name__ == '__main__':
                 # command robot to enter damping mode. soft emergency stop function
                 if tele_data.tele_state.left_thumbstick_state and tele_data.tele_state.right_thumbstick_state:
                     sport_client.Damp()
-                # control, limit velocity to within 0.3
-                sport_client.Move(-tele_data.tele_state.left_thumbstick_value[1]  * 0.3,
-                                  -tele_data.tele_state.left_thumbstick_value[0]  * 0.3,
+                # control, use slower forward vx and faster backward vx
+                vx = -tele_data.tele_state.left_thumbstick_value[1]
+                vx_scale = 0.05 if vx > 0 else 0.5
+                sport_client.Move(vx * vx_scale,
+                                  -tele_data.tele_state.left_thumbstick_value[0]  * 0.2,
                                   -tele_data.tele_state.right_thumbstick_value[0] * 0.3)
 
             # waist yaw control with left A and B buttons (for controller mode)
