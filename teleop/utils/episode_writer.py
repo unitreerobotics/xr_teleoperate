@@ -1,4 +1,6 @@
 import os
+import re
+import shutil
 import cv2
 import json
 import datetime
@@ -37,9 +39,7 @@ class EpisodeWriter():
         self.item_id = -1
         self.episode_id = -1
         if os.path.exists(self.task_dir):
-            episode_dirs = [episode_dir for episode_dir in os.listdir(self.task_dir) if 'episode_' in episode_dir]
-            episode_last = sorted(episode_dirs)[-1] if len(episode_dirs) > 0 else None
-            self.episode_id = 0 if episode_last is None else int(episode_last.split('_')[-1])
+            self.episode_id = self._find_latest_episode_id()
             logger_mp.info(f"==> task_dir directory already exist, now self.episode_id is:{self.episode_id}\n")
         else:
             os.makedirs(self.task_dir)
@@ -55,6 +55,18 @@ class EpisodeWriter():
         self.worker_thread.start()
 
         logger_mp.info("==> EpisodeWriter initialized successfully.\n")
+
+    def _find_latest_episode_id(self):
+        max_episode_id = 0
+        episode_pattern = re.compile(r"^episode_(\d+)$")
+        for root, dirs, _ in os.walk(self.task_dir):
+            for dir_name in dirs:
+                match = episode_pattern.match(dir_name)
+                if match:
+                    episode_id = int(match.group(1))
+                    if episode_id > max_episode_id:
+                        max_episode_id = episode_id
+        return max_episode_id
     
     def is_ready(self):
         return self.is_available
@@ -68,17 +80,26 @@ class EpisodeWriter():
                 "depth": {"width":self.image_size[0], "height":self.image_size[1], "fps":self.frequency},
                 "audio": {"sample_rate": 16000, "channels": 1, "format":"PCM", "bits":16},    # PCM_S16
                 "joint_names":{
-                    "left_arm":   ['kLeftShoulderPitch' ,'kLeftShoulderRoll', 'kLeftShoulderYaw', 'kLeftElbow', 'kLeftWristRoll', 'kLeftWristPitch', 'kLeftWristyaw'],
-                    "left_ee":  [],
-                    "right_arm":  [],
-                    "right_ee": [],
-                    "body":       [],
+                    "left_arm":   ['kLeftShoulderPitch', 'kLeftShoulderRoll', 'kLeftShoulderYaw', 'kLeftElbow', 'kLeftWristRoll', 'kLeftWristPitch', 'kLeftWristYaw'],
+                    "left_ee":    ['kLeftHandThumb0', 'kLeftHandThumb1', 'kLeftHandThumb2', 'kLeftHandMiddle0', 'kLeftHandMiddle1', 'kLeftHandIndex0', 'kLeftHandIndex1'],
+                    "right_arm":  ['kRightShoulderPitch', 'kRightShoulderRoll', 'kRightShoulderYaw', 'kRightElbow', 'kRightWristRoll', 'kRightWristPitch', 'kRightWristYaw'],
+                    "right_ee":   ['kRightHandThumb0', 'kRightHandThumb1', 'kRightHandThumb2', 'kRightHandIndex0', 'kRightHandIndex1', 'kRightHandMiddle0', 'kRightHandMiddle1'],
+                    "waist":      ['kWaistYaw'],  
+                    "base":       [],  
+                },
+                
+                "velocity_names": {
+                    "base":       ['vx', 'vy', 'vyaw'],  
                 },
 
                 "tactile_names": {
-                    "left_ee": [],
-                    "right_ee": [],
-                }, 
+                    "left_ee": ['thumb_base', 'thumb_tip', 'middle_base', 'middle_tip', 'index_base', 'index_tip', 'palm_0', 'palm_1', 'palm_2'],
+                    "right_ee": ['thumb_base', 'thumb_tip', 'index_base', 'index_tip', 'middle_base', 'middle_tip', 'palm_0', 'palm_1', 'palm_2'],
+                },
+                "torque_names": {
+                    "left_ee": ['kLeftHandThumb0', 'kLeftHandThumb1', 'kLeftHandThumb2', 'kLeftHandMiddle0', 'kLeftHandMiddle1', 'kLeftHandIndex0', 'kLeftHandIndex1'],
+                    "right_ee": ['kRightHandThumb0', 'kRightHandThumb1', 'kRightHandThumb2', 'kRightHandIndex0', 'kRightHandIndex1', 'kRightHandMiddle0', 'kRightHandMiddle1'],
+                },
                 "sim_state": ""
             }
 
@@ -98,6 +119,8 @@ class EpisodeWriter():
         # Reset episode-related data and create necessary directories
         self.item_id = -1
         self.episode_id = self.episode_id + 1
+        self.episode_success = True
+        self.episode_subdir = None
         
         self.episode_dir = os.path.join(self.task_dir, f"episode_{str(self.episode_id).zfill(4)}")
         self.color_dir = os.path.join(self.episode_dir, 'colors')
@@ -122,7 +145,7 @@ class EpisodeWriter():
         logger_mp.info(f"==> New episode created: {self.episode_dir}")
         return True  # Return True if the episode is successfully created
         
-    def add_item(self, colors, depths=None, states=None, actions=None, tactiles=None, audios=None, sim_state=None):
+    def add_item(self, colors, depths=None, states=None, actions=None, tactiles=None, torques=None, audios=None, sim_state=None):
         # Increment the item ID
         self.item_id += 1
         # Create the item data dictionary
@@ -133,6 +156,7 @@ class EpisodeWriter():
             'states': states,
             'actions': actions,
             'tactiles': tactiles,
+            'torques': torques,
             'audios': audios,
             'sim_state': sim_state,
         }
@@ -198,10 +222,13 @@ class EpisodeWriter():
             logger_mp.info(f"==> episode_id:{self.episode_id}  item_id:{idx}  current_time:{curent_record_time}")
             self.rerun_logger.log_item_data(item_data)
 
-    def save_episode(self):
+    def save_episode(self, episode_subdir=None):
         """
         Trigger the save operation. This sets the save flag, and the process_queue thread will handle it.
         """
+        if episode_subdir is not None:
+            self.episode_subdir = episode_subdir
+            self.episode_success = episode_subdir != "bad"
         self.need_save = True  # Set the save flag
         logger_mp.info(f"==> Episode saved start...")
 
@@ -210,11 +237,22 @@ class EpisodeWriter():
         Save the episode data to a JSON file.
         """
         with open(self.json_path, "a", encoding="utf-8") as f:
-            f.write("\n]\n}")      # Close the JSON array and object
+            f.write("\n],\n")
+            f.write('"rewards": ' + json.dumps({"success": self.episode_success}, ensure_ascii=False, indent=4) + "\n")
+            f.write("}")      # Close the JSON object
 
         self.need_save = False     # Reset the save flag
         self.is_available = True   # Mark the class as available after saving
-        logger_mp.info(f"==> Episode saved successfully to {self.json_path}.")
+        saved_episode_dir = self.episode_dir
+        if self.episode_subdir:
+            target_root = os.path.join(self.task_dir, self.episode_subdir)
+            os.makedirs(target_root, exist_ok=True)
+            target_episode_dir = os.path.join(target_root, os.path.basename(self.episode_dir))
+            shutil.move(self.episode_dir, target_episode_dir)
+            saved_episode_dir = target_episode_dir
+            self.episode_dir = target_episode_dir
+            self.json_path = os.path.join(self.episode_dir, 'data.json')
+        logger_mp.info(f"==> Episode saved successfully to {saved_episode_dir}.")
 
     def close(self):
         """

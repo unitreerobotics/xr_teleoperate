@@ -1,6 +1,7 @@
 [submodule "teleop/televuer"]
 	path = teleop/televuer
-	url = https://github.com/silencht/televuer
+	url = https://github.com/Hive-Robots/televuer.git
+	branch = main
 [submodule "teleop/robot_control/dex-retargeting"]
 	path = teleop/robot_control/dex-retargeting
 	url = https://github.com/silencht/dex-retargeting

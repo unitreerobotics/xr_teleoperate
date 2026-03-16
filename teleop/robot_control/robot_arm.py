@@ -63,6 +63,7 @@ class G1_29_ArmController:
         logger_mp.info("Initialize G1_29_ArmController...")
         self.q_target = np.zeros(14)
         self.tauff_target = np.zeros(14)
+        self.waist_yaw_target = None 
         self.motion_mode = motion_mode
         self.simulation_mode = simulation_mode
         self.kp_high = 300.0
@@ -183,6 +184,14 @@ class G1_29_ArmController:
                 self.msg.motor_cmd[id].dq = 0
                 self.msg.motor_cmd[id].tau = arm_tauff_target[idx]   
 
+            # Apply waist yaw target position (controlled by X/Y buttons)
+            current_waist_q = self.lowstate_buffer.GetData().motor_state[G1_29_JointIndex.kWaistYaw].q
+            if self.waist_yaw_target is not None:
+                self.msg.motor_cmd[G1_29_JointIndex.kWaistYaw].q = self.waist_yaw_target
+            else:
+                # If no target set, maintain current position (lock waist)
+                self.msg.motor_cmd[G1_29_JointIndex.kWaistYaw].q = current_waist_q
+
             self.msg.crc = self.crc.Crc(self.msg)
             self.lowcmd_publisher.Write(self.msg)
 
@@ -202,6 +211,42 @@ class G1_29_ArmController:
         with self.ctrl_lock:
             self.q_target = q_target
             self.tauff_target = tauff_target
+
+    def ctrl_waist_yaw(self, delta_angle):
+        '''
+        Incrementally adjust the waist yaw joint by delta_angle (in radians).
+        Positive delta rotates to the right, negative to the left.
+        '''
+        # Initialize target to current position on first use
+        if self.waist_yaw_target is None:
+            current_waist = self.lowstate_buffer.GetData().motor_state[G1_29_JointIndex.kWaistYaw].q
+            self.waist_yaw_target = current_waist
+        
+        # Update target position
+        self.waist_yaw_target += delta_angle
+        
+        # Clamp to limits based on URDF (actual limit: ±2.618 rad / ±150°)
+        # Using ±2.0 rad (±114.6°) for safety margin
+        self.waist_yaw_target = np.clip(self.waist_yaw_target, -2.0, 2.0)
+        
+    def get_waist_yaw_target(self):
+        '''Return current waist yaw target position.'''
+        return self.waist_yaw_target if self.waist_yaw_target is not None else 0.0
+    
+    def reset_waist_yaw(self, step_size=0.02):
+        '''
+        Gradually move waist yaw toward zero position.
+        step_size: how fast to move toward zero (rad/frame)
+        '''
+        if self.waist_yaw_target is None:
+            self.waist_yaw_target = 0.0
+            return
+        
+        if abs(self.waist_yaw_target) < step_size:
+            self.waist_yaw_target = 0.0  
+        else:
+            direction = -1.0 if self.waist_yaw_target > 0 else 1.0
+            self.waist_yaw_target += direction * step_size
 
     def get_mode_machine(self):
         '''Return current dds mode machine.'''
@@ -239,6 +284,29 @@ class G1_29_ArmController:
                 break
             current_attempts += 1
             time.sleep(0.05)
+
+    def ctrl_dual_arm_go_rest(self):
+        '''Move both arms to a fixed predefined resting pose.'''
+        logger_mp.info("[G1_29_ArmController] ctrl_dual_arm_go_rest start...")
+        rest_q = np.array([
+            0.28648290038108826, 0.22041386365890503, -0.01690974272787571,
+            0.9790273308753967, 0.10849319398403168, 0.053367193788290024,
+            -0.024075830355286598, 0.2865667939186096, -0.21115006506443024,
+            0.023549001663923264, 0.986038088798523, -0.15373364090919495,
+            0.05697204917669296, 0.013767478056252003
+        ], dtype=float)
+
+        duration = 3.0
+        start_q = self.get_current_dual_arm_q().copy()
+        steps = max(1, int(duration / self.control_dt))
+        dt = duration / steps
+
+        for i in range(1, steps + 1):
+            alpha = i / steps
+            q_interp = (1.0 - alpha) * start_q + alpha * rest_q
+            with self.ctrl_lock:
+                self.q_target = q_interp
+            time.sleep(dt)
 
     def speed_gradual_max(self, t = 5.0):
         '''Parameter t is the total time required for arms velocity to gradually increase to its maximum value, in seconds. The default is 5.0.'''
