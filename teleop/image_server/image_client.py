@@ -149,8 +149,12 @@ class ImageClient:
                         logger_mp.warning(f"[Image Client] Error unpacking header: {e}, discarding message.")
                         continue
                 else:
-                    # No header, entire message is image data
-                    jpg_bytes = message
+                    # Accept both raw JPEG payloads and Unit_Test payloads with a 12-byte header.
+                    header_size = struct.calcsize('dI')
+                    if len(message) > header_size and message[header_size:header_size + 3] == b'\xff\xd8\xff':
+                        jpg_bytes = message[header_size:]
+                    else:
+                        jpg_bytes = message
                 # Decode image
                 np_img = np.frombuffer(jpg_bytes, dtype=np.uint8)
                 current_image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
