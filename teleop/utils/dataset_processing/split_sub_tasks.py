@@ -292,6 +292,23 @@ def detect_pick_place_cut(
     return n // 2
 
 
+def find_rotation_back_start(
+    flags: List[bool],
+    start: int,
+    min_moving_frames: int,
+) -> Optional[int]:
+    """Find the first frame index where a stable moving run starts after `start`."""
+    if start >= len(flags):
+        return None
+
+    runs = bool_runs(flags[start:])
+    base = start
+    for run_start, run_end, state in runs:
+        if state and (run_end - run_start >= min_moving_frames):
+            return base + run_start
+    return None
+
+
 def collect_refs_from_frame(frame: Dict[str, Any]) -> List[str]:
     refs: List[str] = []
     for key in ("colors", "depths", "audios"):
@@ -337,6 +354,14 @@ def write_sub_episode(
     out_json = dict(episode_json)
     out_json["data"] = out_frames
     save_json(dst_episode_dir / "data.json", out_json)
+
+
+def write_rotation_back_note(dst_episode_dir: Path, rotation_back_frame: Optional[int]) -> None:
+    if rotation_back_frame is None:
+        return
+    note_path = dst_episode_dir / "rotation_back.txt"
+    with note_path.open("w", encoding="utf-8") as f:
+        f.write(f"{rotation_back_frame}\n")
 
 
 def main() -> None:
@@ -471,15 +496,31 @@ def main() -> None:
                 min_stopped_frames=args.min_stopped_frames,
                 min_moving_frames=args.min_moving_frames,
             )
+            rotation_back_global = find_rotation_back_start(
+                flags=flags,
+                start=cut_idx,
+                min_moving_frames=args.min_moving_frames,
+            )
         except Exception as exc:
             eprint(f"Skipping {ep_dir.name}: {exc}")
             continue
 
         n_frames = len(frames)
         cut_idx = max(1, min(cut_idx, n_frames - 1))
+        if rotation_back_global is not None:
+            rotation_back_global = max(cut_idx, min(rotation_back_global, n_frames - 1))
+        rotation_back_sub = (
+            rotation_back_global - cut_idx if rotation_back_global is not None else None
+        )
+
         print(
             f"{ep_dir.name} | yaw={yaw_group}[{yaw_joint_idx}] '{yaw_joint_name}' | "
             f"cut_frame={cut_idx} (pick:0-{cut_idx - 1}, place:{cut_idx}-{n_frames - 1})"
+            + (
+                f" | rotation_back={rotation_back_global} (sub={rotation_back_sub})"
+                if rotation_back_global is not None
+                else ""
+            )
         )
 
         if args.dry_run:
@@ -498,6 +539,10 @@ def main() -> None:
                 frames=sliced_frames,
                 keep_idx=args.keep_idx,
             )
+
+            # If this is the place subtask, write a note about when rotation-back begins.
+            if i == 2:
+                write_rotation_back_note(out_ep_dir, rotation_back_sub)
 
     if args.dry_run:
         print("\n[DRY RUN] Completed.")
