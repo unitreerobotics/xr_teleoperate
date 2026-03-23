@@ -70,6 +70,7 @@ def publish_reset_category(category: int,publisher): # Scene Reset signal
 # state transition
 START          = False  # Enable to start robot following VR user motion  
 STOP           = False  # Enable to begin system exit procedure
+PAUSED         = False  # Enable to freeze teleop commands without exiting
 RECORD_TOGGLE  = False  # [Ready] ⇄ [Recording] ⟶ [AutoSave] ⟶ [Ready]         (⇄ manual) (⟶ auto)
 RECORD_RUNNING = False  # True if [Recording]
 RECORD_READY   = True   # True if [Ready], False if [Recording] / [AutoSave]
@@ -315,12 +316,15 @@ def draw_task_overlay(img: np.ndarray) -> None:
         y += 18
 
 def on_press(key):
-    global STOP, START, RECORD_TOGGLE, RECORD_STOP_META, RECORD_RUNNING
+    global STOP, START, PAUSED, RECORD_TOGGLE, RECORD_STOP_META, RECORD_RUNNING
     if key == 'r':
         START = True
     elif key == 'q':
         START = False
         STOP = True
+    elif START == True and key == 'p':
+        PAUSED = not PAUSED
+        logger_mp.info(f"[on_press] pause toggled: {PAUSED}")
     elif START == True and key in ('s', 'f', 'e'):
         if not RECORD_RUNNING:
             if key == 's':
@@ -351,10 +355,11 @@ def on_info(info):
 
 def get_state() -> dict:
     """Return current heartbeat state"""
-    global START, STOP, RECORD_RUNNING, RECORD_READY
+    global START, STOP, PAUSED, RECORD_RUNNING, RECORD_READY
     return {
         "START": START,
         "STOP": STOP,
+        "PAUSED": PAUSED,
         "RECORD_RUNNING": RECORD_RUNNING,
         "RECORD_READY": RECORD_READY,
     }
@@ -726,6 +731,7 @@ if __name__ == '__main__':
         left_tare_pending = False
         right_trigger_prev = False
         left_trigger_prev = False
+        right_pause_button_prev = False
         
         # Initialize ramped targets to grab pose (closed hands) since we start closed
         if args.ee == "dex3":
@@ -736,6 +742,9 @@ if __name__ == '__main__':
         nav_vx = 0.0
         nav_vy = 0.0
         nav_vyaw = 0.0
+        paused_prev = False
+        paused_arm_q = None
+        paused_hand_q = None
         
         loop_idx = 0
         while not STOP:
@@ -789,6 +798,13 @@ if __name__ == '__main__':
             # get input data
             tele_data = tv_wrapper.get_motion_state_data()
 
+            if args.xr_mode == "controller":
+                right_pause_button = bool(getattr(tele_data.tele_state, "right_squeeze_ctrl_state", False))
+                if right_pause_button and not right_pause_button_prev:
+                    PAUSED = not PAUSED
+                    logger_mp.info(f"[controller] pause toggled by right squeeze: {PAUSED}")
+                right_pause_button_prev = right_pause_button
+
             if (args.ee == "dex3" or args.ee == "inspire1" or args.ee == "brainco") and args.xr_mode == "hand":
                 with left_hand_pos_array.get_lock():
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
@@ -837,6 +853,47 @@ if __name__ == '__main__':
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
             current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
             current_full_motor_q = arm_ctrl.get_current_motor_q()  # For waist data
+
+            if PAUSED:
+                if not paused_prev:
+                    paused_arm_q = np.array(current_lr_arm_q, dtype=np.float64).copy()
+                    if 'dual_hand_action_array' in locals():
+                        with dual_hand_data_lock:
+                            paused_hand_q = np.array(dual_hand_action_array[:], dtype=np.float64)
+                    else:
+                        paused_hand_q = None
+                    if args.xr_mode == "controller" and args.motion:
+                        sport_client.Move(0.0, 0.0, 0.0)
+                    logger_mp.info("[pause] Teleop paused.")
+                    paused_prev = True
+
+                nav_vx, nav_vy, nav_vyaw = 0.0, 0.0, 0.0
+                if paused_arm_q is not None:
+                    arm_ctrl.ctrl_dual_arm(paused_arm_q, np.zeros_like(paused_arm_q))
+
+                if args.ee == "dex3" and paused_hand_q is not None:
+                    for i, jid in enumerate(Dex3_1_Left_JointIndex):
+                        dex3_left_msg.motor_cmd[jid].q = paused_hand_q[i]
+                    for i, jid in enumerate(Dex3_1_Right_JointIndex):
+                        dex3_right_msg.motor_cmd[jid].q = paused_hand_q[7 + i]
+                    dex3_left_pub.Write(dex3_left_msg)
+                    dex3_right_pub.Write(dex3_right_msg)
+                elif args.ee == "fake_dex" and paused_hand_q is not None:
+                    for i, jid in enumerate(Dex3_1_Left_JointIndex):
+                        dex3_left_msg.motor_cmd[jid].q = paused_hand_q[i]
+                    dex3_left_pub.Write(dex3_left_msg)
+
+                current_time = time.time()
+                time_elapsed = current_time - start_time
+                sleep_time = max(0, (1 / args.frequency) - time_elapsed)
+                time.sleep(sleep_time)
+                logger_mp.debug(f"main process sleep: {sleep_time}")
+                continue
+            elif paused_prev:
+                paused_prev = False
+                paused_arm_q = None
+                paused_hand_q = None
+                logger_mp.info("[pause] Teleop resumed.")
 
             # solve ik using motor data and wrist pose, then use ik results to control arms.
             time_ik_start = time.time()
@@ -1284,7 +1341,7 @@ if __name__ == '__main__':
                 right_arm_state = current_lr_arm_q[-7:]
                 left_arm_action = sol_q[:7]
                 right_arm_action = sol_q[-7:]
-                if RECORD_RUNNING:
+                if RECORD_RUNNING and not PAUSED:
                     colors = {}
                     depths = {}
                     if BINOCULAR:
@@ -1415,6 +1472,7 @@ if __name__ == '__main__':
     finally:
         try:
             arm_ctrl.ctrl_dual_arm_go_rest()
+            arm_ctrl.ctrl_waist_go_rest()
         except Exception as e:
             logger_mp.warning(f"Failed to move arm to rest on exit: {e}")
 

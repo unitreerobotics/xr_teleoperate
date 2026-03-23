@@ -59,11 +59,21 @@ class DataBuffer:
             self.data = data
 
 class G1_29_ArmController:
+    # Predefined rest pose for initialization
+    REST_Q = np.array([
+        0.28648290038108826, 0.22041386365890503, -0.01690974272787571,
+        0.9790273308753967, 0.10849319398403168, 0.053367193788290024,
+        -0.024075830355286598, 0.2865667939186096, -0.21115006506443024,
+        0.023549001663923264, 0.986038088798523, -0.15373364090919495,
+        0.05697204917669296, 0.013767478056252003
+    ], dtype=float)
+    
     def __init__(self, motion_mode = False, simulation_mode = False, dds_interface: str = "enx98fc84ec937b"):
         logger_mp.info("Initialize G1_29_ArmController...")
-        self.q_target = np.zeros(14)
+        self.q_target = self.REST_Q.copy()
+        #self.q_target = np.zeros(14) # Initialize arms in front
         self.tauff_target = np.zeros(14)
-        self.waist_yaw_target = None 
+        self.waist_yaw_target = 0.0  # Initialize waist to zero position
         self.motion_mode = motion_mode
         self.simulation_mode = simulation_mode
         self.kp_high = 300.0
@@ -288,14 +298,6 @@ class G1_29_ArmController:
     def ctrl_dual_arm_go_rest(self):
         '''Move both arms to a fixed predefined resting pose.'''
         logger_mp.info("[G1_29_ArmController] ctrl_dual_arm_go_rest start...")
-        rest_q = np.array([
-            0.28648290038108826, 0.22041386365890503, -0.01690974272787571,
-            0.9790273308753967, 0.10849319398403168, 0.053367193788290024,
-            -0.024075830355286598, 0.2865667939186096, -0.21115006506443024,
-            0.023549001663923264, 0.986038088798523, -0.15373364090919495,
-            0.05697204917669296, 0.013767478056252003
-        ], dtype=float)
-
         duration = 3.0
         start_q = self.get_current_dual_arm_q().copy()
         steps = max(1, int(duration / self.control_dt))
@@ -303,10 +305,26 @@ class G1_29_ArmController:
 
         for i in range(1, steps + 1):
             alpha = i / steps
-            q_interp = (1.0 - alpha) * start_q + alpha * rest_q
+            q_interp = (1.0 - alpha) * start_q + alpha * self.REST_Q
             with self.ctrl_lock:
                 self.q_target = q_interp
             time.sleep(dt)
+
+    def ctrl_waist_go_rest(self, duration=3.0):
+        '''Slowly move waist yaw to zero position over specified duration (in seconds).'''
+        logger_mp.info(f"[G1_29_ArmController] ctrl_waist_go_rest start (duration: {duration}s)...")
+        start_waist = self.waist_yaw_target if self.waist_yaw_target is not None else 0.0
+        steps = max(1, int(duration / self.control_dt))
+        dt = duration / steps
+
+        for i in range(1, steps + 1):
+            alpha = i / steps
+            waist_interp = (1.0 - alpha) * start_waist + alpha * 0.0
+            self.waist_yaw_target = waist_interp
+            time.sleep(dt)
+        
+        self.waist_yaw_target = 0.0
+        logger_mp.info("[G1_29_ArmController] waist has reached zero position.")
 
     def speed_gradual_max(self, t = 5.0):
         '''Parameter t is the total time required for arms velocity to gradually increase to its maximum value, in seconds. The default is 5.0.'''
@@ -491,6 +509,10 @@ class G1_23_ArmController:
                     self.msg.motor_cmd[id].kd = self.kd_high
             self.msg.motor_cmd[id].q  = self.all_motor_q[id]
         logger_mp.info("Lock OK!\n")
+        
+        # Initialize arm target to current position to prevent movement at startup
+        self.q_target = self.get_current_dual_arm_q().copy()
+        self.tauff_target = np.zeros(10)
 
         # initialize publish thread
         self.publish_thread = threading.Thread(target=self._ctrl_motor_state)
@@ -771,6 +793,10 @@ class H1_2_ArmController:
                     self.msg.motor_cmd[id].kd = self.kd_high
             self.msg.motor_cmd[id].q  = self.all_motor_q[id]
         logger_mp.info("Lock OK!\n")
+        
+        # Initialize arm target to current position to prevent movement at startup
+        self.q_target = self.get_current_dual_arm_q().copy()
+        self.tauff_target = np.zeros(14)
 
         # initialize publish thread
         self.publish_thread = threading.Thread(target=self._ctrl_motor_state)
@@ -1045,6 +1071,10 @@ class H1_ArmController:
                 self.msg.motor_cmd[id].mode = 0x0A
             self.msg.motor_cmd[id].q  = self.all_motor_q[id]
         logger_mp.info("Lock OK!\n")
+        
+        # Initialize arm target to current position to prevent movement at startup
+        self.q_target = self.get_current_dual_arm_q().copy()
+        self.tauff_target = np.zeros(8)
 
         # initialize publish thread
         self.publish_thread = threading.Thread(target=self._ctrl_motor_state)
