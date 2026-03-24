@@ -30,6 +30,12 @@ logger_mp = logging_mp.get_logger(__name__, level=logging_mp.INFO)
         }
     }
 
+4) pause or resume (toggle)
+    {
+        "reqid": unique id,
+        "cmd": "CMD_PAUSE_TOGGLE"
+    }
+
 # Server → Client (Reply)
 1) if ok
     {
@@ -53,6 +59,7 @@ logger_mp = logging_mp.get_logger(__name__, level=logging_mp.INFO)
     {
         "START": True | False,          # whether robot follow vr
         "STOP" : True | False,          # whether exit program
+        "PAUSED": True | False,         # whether teleop is paused (frozen without exit)
         "RECORD_RUNNING": True | False, # whether is recording
         "RECORD_READY": True | False,   # whether ready to record
     }
@@ -70,6 +77,7 @@ class IPC_Server:
         "CMD_START": "r",          # launch
         "CMD_STOP": "q",           # exit
         "CMD_RECORD_TOGGLE": "s",  # start & stop (toggle record)
+        "CMD_PAUSE_TOGGLE": "p",   # pause / resume (toggle)
     }
 
     def __init__(self, on_press=None, on_info=None, get_state=None, hb_fps=10.0):
