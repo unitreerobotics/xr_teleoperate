@@ -147,3 +147,23 @@ Flags:
 - `--min-moving-frames` (default: `20`): Minimum stable moving-run length.
 - `--keep-idx`: Keep original frame `idx` values in output.
 - `--dry-run`: Print cut ranges and actions without writing output.
+
+## `plot_feature.py`
+Purpose: Plot one joint trajectory from either a single episode or a full dataset. For dataset plots, each episode is shown with a faint line and the dataset average is overlaid.
+
+Examples:
+```bash
+python teleop/utils/dataset_processing/plot_feature.py teleop/testdata/episode_0006 --group left_arm --joint-index 0
+python teleop/utils/dataset_processing/plot_feature.py teleop/testdata/episode_0006/data.json --group left_arm --joint-name kLeftShoulderPitch
+python teleop/utils/dataset_processing/plot_feature.py teleop/testdata --group left_arm --joint-index 0 --output left_arm_joint0.png
+```
+
+Arguments and flags:
+- `path` (positional, required): Dataset directory, episode directory, or `data.json` file.
+- `--source` (default: `states`): Plot from `states` or `actions`.
+- `--group` (required): Joint group name, for example `left_arm`.
+- `--joint-index`: Joint index inside the selected group.
+- `--joint-name`: Joint name inside the selected group. Uses `info.joint_names` to resolve the index.
+- `--output` (default: interactive window): Save plot to an image file instead of opening a window.
+- `--title` (default: auto): Custom plot title.
+
