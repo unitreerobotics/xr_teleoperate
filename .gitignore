@@ -22,4 +22,5 @@ __MACOSX/
 teleop/data/
 episode_0*
 .vscode/
+utils/data/task_prompts_list.json
 *.LOG

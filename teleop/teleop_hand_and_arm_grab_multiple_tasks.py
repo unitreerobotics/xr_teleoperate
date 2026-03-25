@@ -1,5 +1,6 @@
 import ctypes
 import os
+import re
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -55,10 +56,12 @@ def _redirect_cyclonedds_trace_log() -> None:
     try:
         import unitree_sdk2py.core.channel as _dds_channel
         cfg = getattr(_dds_channel, "ChannelConfigHasInterface", None)
-        if isinstance(cfg, str) and "/tmp/cdds.LOG" in cfg:
+        if isinstance(cfg, str):
             local_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cdds.LOG")
-            setattr(_dds_channel, "ChannelConfigHasInterface", cfg.replace("/tmp/cdds.LOG", local_log))
-            logger_mp.info(f"[dds] Redirect CycloneDDS trace log to: {local_log}")
+            patched_cfg = re.sub(r"<OutputFile>.*?</OutputFile>", f"<OutputFile>{local_log}</OutputFile>", cfg, count=1, flags=re.S)
+            if patched_cfg != cfg:
+                setattr(_dds_channel, "ChannelConfigHasInterface", patched_cfg)
+                logger_mp.info(f"[dds] Redirect CycloneDDS trace log to: {local_log}")
     except Exception as e:
         logger_mp.warning(f"[dds] Failed to patch CycloneDDS trace log path: {e}")
 

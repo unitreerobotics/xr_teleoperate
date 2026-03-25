@@ -2,7 +2,8 @@
 """
 Interactive dataset viewer for Rerun.
 
-- Spawns a single Rerun viewer.
+- Spawns a Rerun viewer on the first available port (starting at 9876).
+- If another viewer is already running, this starts a separate instance.
 - Lazily logs the currently selected episode.
 - Use terminal input to switch episodes:
     n = next, p = previous, <number> = jump, q = quit
@@ -107,10 +108,22 @@ class EpisodeReader:
 
 
 class RerunDatasetViewer:
-    def __init__(self, window: int = 60, memory_limit: str | None = None):
+    def __init__(
+        self,
+        window: int = 60,
+        memory_limit: str | None = None,
+        viewer_port: int = 9876,
+        port_scan: int = 64,
+    ):
         self.window = window
 
         rr.init(datetime.now().strftime("DatasetViewer_%Y%m%d_%H%M%S"))
+        self.viewer_port = self._pick_available_port(start_port=viewer_port, max_tries=port_scan)
+
+        spawn_kwargs = {
+            "port": self.viewer_port,
+            "hide_welcome_screen": True,
+        }
         if memory_limit:
             rr.spawn(memory_limit=memory_limit, hide_welcome_screen=True)
         else:
@@ -319,6 +332,13 @@ def main() -> None:
     parser.add_argument("--start", type=int, default=None, help="Start episode index (e.g. 12)")
     parser.add_argument("--window", type=int, default=60)
     parser.add_argument("--memory-limit", type=str, default=None, help="e.g. 200MB or 1GB")
+    parser.add_argument("--viewer-port", type=int, default=9876, help="Preferred Rerun viewer port")
+    parser.add_argument(
+        "--viewer-port-scan",
+        type=int,
+        default=64,
+        help="How many ports to scan upward if preferred port is busy",
+    )
     parser.add_argument("--playback", choices=["offline", "online"], default="offline")
     parser.add_argument("--hz", type=float, default=30.0)
     args = parser.parse_args()
@@ -338,7 +358,14 @@ def main() -> None:
     cur_ep = eps[cur_idx]
 
     reader = EpisodeReader(task_dir=str(task_dir))
-    viewer = RerunDatasetViewer(window=args.window, memory_limit=args.memory_limit)
+    viewer = RerunDatasetViewer(
+        window=args.window,
+        memory_limit=args.memory_limit,
+        viewer_port=args.viewer_port,
+        port_scan=args.viewer_port_scan,
+    )
+    if viewer.viewer_port > 0:
+        print(f"Rerun viewer port: {viewer.viewer_port}")
 
     def show_episode(ep: int) -> bool:
         try:

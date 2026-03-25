@@ -292,6 +292,23 @@ def detect_pick_place_cut(
     return n // 2
 
 
+def find_rotation_back_start(
+    flags: List[bool],
+    start: int,
+    min_moving_frames: int,
+) -> Optional[int]:
+    """Find the first frame index where a stable moving run starts after `start`."""
+    if start >= len(flags):
+        return None
+
+    runs = bool_runs(flags[start:])
+    base = start
+    for run_start, run_end, state in runs:
+        if state and (run_end - run_start >= min_moving_frames):
+            return base + run_start
+    return None
+
+
 def collect_refs_from_frame(frame: Dict[str, Any]) -> List[str]:
     refs: List[str] = []
     for key in ("colors", "depths", "audios"):
@@ -339,6 +356,22 @@ def write_sub_episode(
     save_json(dst_episode_dir / "data.json", out_json)
 
 
+def write_rotation_back_note(dst_episode_dir: Path, rotation_back_frame: Optional[int]) -> None:
+    if rotation_back_frame is None:
+        return
+    note_path = dst_episode_dir / "rotation_back.txt"
+    with note_path.open("w", encoding="utf-8") as f:
+        f.write(f"{rotation_back_frame}\n")
+
+
+def write_overlap_note(dst_episode_dir: Path, overlap_frames: int) -> None:
+    if overlap_frames <= 0:
+        return
+    note_path = dst_episode_dir / "overlap_frames_n.txt"
+    with note_path.open("w", encoding="utf-8") as f:
+        f.write(f"{overlap_frames}\n")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Split dataset episodes into pick(place) halves using yaw-defined cut frame."
@@ -347,7 +380,7 @@ def main() -> None:
     ap.add_argument(
         "--dst",
         default=None,
-        help="Destination root. Default: <src_parent>/<src_name>_split_sub_tasks",
+        help="Destination root. Default: <src_parent>/<src_name>_split_sub_tasks_n_overlapped",
     )
     ap.add_argument("--overwrite", action="store_true", help="Overwrite destination if it already exists")
     ap.add_argument("--yaw-source", choices=["states", "actions"], default="states")
@@ -373,6 +406,12 @@ def main() -> None:
         help="Minimum frames for a moving run to be considered stable (>=1)",
     )
     ap.add_argument("--keep-idx", action="store_true", help="Keep original frame idx; default reindexes per sub-episode")
+    ap.add_argument(
+        "--overlap-frames",
+        type=int,
+        default=0,
+        help="Number of overlapping frames between pick and place subtasks (>=0)",
+    )
     ap.add_argument("--dry-run", action="store_true", help="Only print planned ranges; do not write output")
     args = ap.parse_args()
 
@@ -381,7 +420,7 @@ def main() -> None:
         eprint(f"ERROR: --src is not a directory: {src}")
         sys.exit(2)
 
-    dst = Path(args.dst).expanduser().resolve() if args.dst else (src.parent / f"{src.name}_split_sub_tasks")
+    dst = Path(args.dst).expanduser().resolve() if args.dst else (src.parent / f"{src.name}_split_sub_tasks_n_overlapped")
     if dst.exists() and not args.overwrite and not args.dry_run:
         eprint(f"ERROR: destination already exists: {dst} (use --overwrite)")
         sys.exit(2)
@@ -400,8 +439,8 @@ def main() -> None:
     if args.min_stopped_frames < 1:
         eprint("--min-stopped-frames must be >= 1")
         sys.exit(2)
-    if args.min_moving_frames < 1:
-        eprint("--min-moving-frames must be >= 1")
+    if args.overlap_frames < 0:
+        eprint("--overlap-frames must be >= 0")
         sys.exit(2)
 
     sub_names = ["pick", "place"]
@@ -471,21 +510,39 @@ def main() -> None:
                 min_stopped_frames=args.min_stopped_frames,
                 min_moving_frames=args.min_moving_frames,
             )
+            rotation_back_global = find_rotation_back_start(
+                flags=flags,
+                start=cut_idx,
+                min_moving_frames=args.min_moving_frames,
+            )
         except Exception as exc:
             eprint(f"Skipping {ep_dir.name}: {exc}")
             continue
 
         n_frames = len(frames)
         cut_idx = max(1, min(cut_idx, n_frames - 1))
-        print(
-            f"{ep_dir.name} | yaw={yaw_group}[{yaw_joint_idx}] '{yaw_joint_name}' | "
-            f"cut_frame={cut_idx} (pick:0-{cut_idx - 1}, place:{cut_idx}-{n_frames - 1})"
+
+        # Apply overlap: pick extends n frames after cut, place starts n frames before cut
+        pick_end = min(n_frames, cut_idx + args.overlap_frames)
+        place_start = max(0, cut_idx - args.overlap_frames)
+        ranges = [(0, pick_end), (place_start, n_frames)]
+
+        if rotation_back_global is not None:
+            rotation_back_global = max(cut_idx, min(rotation_back_global, n_frames - 1))
+        rotation_back_sub = (
+            rotation_back_global - place_start if rotation_back_global is not None else None
         )
 
-        if args.dry_run:
-            continue
-
-        ranges = [(0, cut_idx), (cut_idx, n_frames)]
+        print(
+            f"{ep_dir.name} | yaw={yaw_group}[{yaw_joint_idx}] '{yaw_joint_name}' | "
+            f"cut_frame={cut_idx}, overlap={args.overlap_frames} | "
+            f"pick:0-{pick_end - 1}, place:{place_start}-{n_frames - 1}"
+            + (
+                f" | rotation_back={rotation_back_global} (sub={rotation_back_sub})"
+                if rotation_back_global is not None
+                else ""
+            )
+        )
         for i, (start, end) in enumerate(ranges, start=1):
             out_ep_dir = sub_roots[i - 1] / ep_dir.name
             sliced_frames = frames[start:end]
@@ -498,6 +555,11 @@ def main() -> None:
                 frames=sliced_frames,
                 keep_idx=args.keep_idx,
             )
+
+            # If this is the place subtask, write notes.
+            if i == 2:
+                write_rotation_back_note(out_ep_dir, rotation_back_sub)
+                write_overlap_note(out_ep_dir, args.overlap_frames)
 
     if args.dry_run:
         print("\n[DRY RUN] Completed.")
