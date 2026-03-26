@@ -698,8 +698,16 @@ if __name__ == '__main__':
             logger_mp.info(f"Recording side: {args.record_side}")
 
 
+        right_start_button_prev = False
         logger_mp.info("Please enter the start signal (enter 'r' to start the subsequent program)")
         while not START and not STOP:
+            if args.xr_mode == "controller":
+                tele_data = tv_wrapper.get_motion_state_data()
+                right_start_button = bool(getattr(tele_data.tele_state, "right_bButton", False))
+                if right_start_button and not right_start_button_prev:
+                    on_press('r')
+                    logger_mp.info("[controller] teleop start triggered by right B button")
+                right_start_button_prev = right_start_button
             time.sleep(0.01)
         logger_mp.info("start program.")
         arm_ctrl.speed_gradual_max()
