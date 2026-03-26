@@ -804,8 +804,8 @@ if __name__ == '__main__':
             if args.xr_mode == "controller":
                 right_pause_button = bool(getattr(tele_data.tele_state, "right_squeeze_ctrl_state", False))
                 if right_pause_button and not right_pause_button_prev:
-                    PAUSED = not PAUSED
-                    logger_mp.info(f"[controller] pause toggled by right squeeze: {PAUSED}")
+                    on_press('p')
+                    logger_mp.info(f"[controller] pause toggled by right squeeze")
                 right_pause_button_prev = right_pause_button
 
             if (args.ee == "dex3" or args.ee == "inspire1" or args.ee == "brainco") and args.xr_mode == "hand":
@@ -816,6 +816,51 @@ if __name__ == '__main__':
             else:
                 pass        
             
+            # get current robot state data.
+            current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
+            current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
+            current_full_motor_q = arm_ctrl.get_current_motor_q()  # For waist data
+
+            if PAUSED:
+                if not paused_prev:
+                    paused_arm_q = np.array(current_lr_arm_q, dtype=np.float64).copy()
+                    if 'dual_hand_action_array' in locals():
+                        with dual_hand_data_lock:
+                            paused_hand_q = np.array(dual_hand_action_array[:], dtype=np.float64)
+                    else:
+                        paused_hand_q = None
+                    if args.xr_mode == "controller" and args.motion:
+                        sport_client.Move(0.0, 0.0, 0.0)
+                    logger_mp.info("[pause] Teleop paused.")
+                    paused_prev = True
+
+                if paused_arm_q is not None:
+                    arm_ctrl.ctrl_dual_arm(paused_arm_q, np.zeros_like(paused_arm_q))
+
+                if args.ee == "dex3" and paused_hand_q is not None:
+                    for i, jid in enumerate(Dex3_1_Left_JointIndex):
+                        dex3_left_msg.motor_cmd[jid].q = paused_hand_q[i]
+                    for i, jid in enumerate(Dex3_1_Right_JointIndex):
+                        dex3_right_msg.motor_cmd[jid].q = paused_hand_q[7 + i]
+                    dex3_left_pub.Write(dex3_left_msg)
+                    dex3_right_pub.Write(dex3_right_msg)
+                elif args.ee == "fake_dex" and paused_hand_q is not None:
+                    for i, jid in enumerate(Dex3_1_Left_JointIndex):
+                        dex3_left_msg.motor_cmd[jid].q = paused_hand_q[i]
+                    dex3_left_pub.Write(dex3_left_msg)
+
+                current_time = time.time()
+                time_elapsed = current_time - start_time
+                sleep_time = max(0, (1 / args.frequency) - time_elapsed)
+                time.sleep(sleep_time)
+                logger_mp.debug(f"main process sleep: {sleep_time}")
+                continue
+            elif paused_prev:
+                paused_prev = False
+                paused_arm_q = None
+                paused_hand_q = None
+                logger_mp.info("[pause] Teleop resumed.")
+
             # high level control
             if args.xr_mode == "controller" and args.motion:
                 # quit teleoperate
@@ -851,52 +896,6 @@ if __name__ == '__main__':
                     # Grip button (left controller): gradually reset waist yaw to zero
                     arm_ctrl.reset_waist_yaw()
                     logger_mp.debug(f"Waist yaw resetting to zero: {arm_ctrl.get_waist_yaw_target():.3f}")
-
-            # get current robot state data.
-            current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
-            current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
-            current_full_motor_q = arm_ctrl.get_current_motor_q()  # For waist data
-
-            if PAUSED:
-                if not paused_prev:
-                    paused_arm_q = np.array(current_lr_arm_q, dtype=np.float64).copy()
-                    if 'dual_hand_action_array' in locals():
-                        with dual_hand_data_lock:
-                            paused_hand_q = np.array(dual_hand_action_array[:], dtype=np.float64)
-                    else:
-                        paused_hand_q = None
-                    if args.xr_mode == "controller" and args.motion:
-                        sport_client.Move(0.0, 0.0, 0.0)
-                    logger_mp.info("[pause] Teleop paused.")
-                    paused_prev = True
-
-                nav_vx, nav_vy, nav_vyaw = 0.0, 0.0, 0.0
-                if paused_arm_q is not None:
-                    arm_ctrl.ctrl_dual_arm(paused_arm_q, np.zeros_like(paused_arm_q))
-
-                if args.ee == "dex3" and paused_hand_q is not None:
-                    for i, jid in enumerate(Dex3_1_Left_JointIndex):
-                        dex3_left_msg.motor_cmd[jid].q = paused_hand_q[i]
-                    for i, jid in enumerate(Dex3_1_Right_JointIndex):
-                        dex3_right_msg.motor_cmd[jid].q = paused_hand_q[7 + i]
-                    dex3_left_pub.Write(dex3_left_msg)
-                    dex3_right_pub.Write(dex3_right_msg)
-                elif args.ee == "fake_dex" and paused_hand_q is not None:
-                    for i, jid in enumerate(Dex3_1_Left_JointIndex):
-                        dex3_left_msg.motor_cmd[jid].q = paused_hand_q[i]
-                    dex3_left_pub.Write(dex3_left_msg)
-
-                current_time = time.time()
-                time_elapsed = current_time - start_time
-                sleep_time = max(0, (1 / args.frequency) - time_elapsed)
-                time.sleep(sleep_time)
-                logger_mp.debug(f"main process sleep: {sleep_time}")
-                continue
-            elif paused_prev:
-                paused_prev = False
-                paused_arm_q = None
-                paused_hand_q = None
-                logger_mp.info("[pause] Teleop resumed.")
 
             # solve ik using motor data and wrist pose, then use ik results to control arms.
             time_ik_start = time.time()
