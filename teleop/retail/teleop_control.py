@@ -98,22 +98,6 @@ if __name__ == '__main__':
     logger_mp.info(f"args: {args}")
 
     try:
-        def filter_states_actions_by_side(states, actions, record_side):
-            if record_side == "both":
-                return states, actions
-            keep_prefix = "left" if record_side == "left" else "right"
-            filtered_states = {key: value for key, value in states.items() if key.startswith(keep_prefix)}
-            filtered_actions = {key: value for key, value in actions.items() if key.startswith(keep_prefix)}
-
-            # keep non-side specific entries such as body
-            for key, value in states.items():
-                if not key.startswith(("left_", "right_")):
-                    filtered_states[key] = value
-            for key, value in actions.items():
-                if not key.startswith(("left_", "right_")):
-                    filtered_actions[key] = value
-            return filtered_states, filtered_actions
-
         # ipc communication. client usage: see utils/ipc.py
         if args.ipc:
             ipc_server = IPC_Server(on_press=on_press, on_info=on_info, get_state=get_state)
@@ -279,10 +263,6 @@ if __name__ == '__main__':
         if args.record and args.xr_mode == "controller":
             recorder.info["joint_names"]["left_trig"] = ["left_trig"]
             recorder.info["joint_names"]["right_trig"] = ["right_trig"]
-        if args.record:
-            logger_mp.info(f"Recording side: {args.record_side}")
-
-
         logger_mp.info("Please enter the start signal (enter 'r' to start the subsequent program)")
         while not START and not STOP:
             time.sleep(0.01)
@@ -877,7 +857,6 @@ if __name__ == '__main__':
                             "qvel": [],
                             "torque": [],
                         }
-                    states, actions = filter_states_actions_by_side(states, actions, args.record_side)
                     recorder.add_item(colors=colors, depths=depths, states=states, actions=actions)
 
             current_time = time.time()

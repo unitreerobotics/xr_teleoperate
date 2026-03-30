@@ -384,7 +384,6 @@ if __name__ == '__main__':
     parser.add_argument('--affinity', action = 'store_true', help = 'Enable high priority and set CPU affinity')
     parser.add_argument('--ipc', action = 'store_true', help = 'Enable IPC server to handle input; otherwise enable sshkeyboard')
     parser.add_argument('--record', action = 'store_true', help = 'Enable data recording')
-    parser.add_argument('--record-side', type=str, choices=['left', 'right', 'both'], default='both', help='Select which side(s) to record')
     parser.add_argument('--task-dir', type = str, default = '/mnt/sata1/xr_teleoperate_datasets/', help = 'path to save data')
     parser.add_argument('--task-name', type = str, default = 'pick cube', help = 'task name for recording')
     parser.add_argument('--task-desc', type = str, default = 'e.g. pick the red cube on the table.', help = 'task goal for recording')
@@ -397,34 +396,6 @@ if __name__ == '__main__':
     _redirect_cyclonedds_trace_log()
 
     try:
-        def filter_states_actions_by_side(states, actions, record_side, tactiles=None, torques=None):
-            if tactiles is None:
-                tactiles = {}
-            if torques is None:
-                torques = {}
-            if record_side == "both":
-                return states, actions, tactiles, torques
-            keep_prefix = "left" if record_side == "left" else "right"
-            filtered_states = {key: value for key, value in states.items() if key.startswith(keep_prefix)}
-            filtered_actions = {key: value for key, value in actions.items() if key.startswith(keep_prefix)}
-            filtered_tactiles = {key: value for key, value in tactiles.items() if key.startswith(keep_prefix)}
-            filtered_torques = {key: value for key, value in torques.items() if key.startswith(keep_prefix)}
-
-            # keep non-side specific entries such as body
-            for key, value in states.items():
-                if not key.startswith(("left_", "right_")):
-                    filtered_states[key] = value
-            for key, value in actions.items():
-                if not key.startswith(("left_", "right_")):
-                    filtered_actions[key] = value
-            for key, value in tactiles.items():
-                if not key.startswith(("left_", "right_")):
-                    filtered_tactiles[key] = value
-            for key, value in torques.items():
-                if not key.startswith(("left_", "right_")):
-                    filtered_torques[key] = value
-            return filtered_states, filtered_actions, filtered_tactiles, filtered_torques
-
         # multi-task prompts
         TASKS = load_tasks(args.tasks_file, args.tasks, args.task_name, args.task_desc)
         BASE_TASK_NAME = args.task_name
@@ -695,9 +666,6 @@ if __name__ == '__main__':
                 recorder.info["joint_names"]["left_trig"] = ["left_trig"]
                 recorder.info["joint_names"]["right_trig"] = ["right_trig"]
             apply_task_to_recorder(recorder, initial_task, TASK_IDX, args.task_name)
-            logger_mp.info(f"Recording side: {args.record_side}")
-
-
         right_start_button_prev = False
         logger_mp.info("Please enter the start signal (enter 'r' to start the subsequent program)")
         while not START and not STOP:
@@ -1458,9 +1426,6 @@ if __name__ == '__main__':
                             torques["right_ee"] = right_tau.tolist()
                         if "left_tau" in locals():
                             torques["left_ee"] = left_tau.tolist()
-                    states, actions, tactiles, torques = filter_states_actions_by_side(
-                        states, actions, args.record_side, tactiles, torques
-                    )
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            
                         recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, tactiles=tactiles, torques=torques, sim_state=sim_state)
