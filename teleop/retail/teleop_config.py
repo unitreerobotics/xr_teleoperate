@@ -6,6 +6,7 @@ DEFAULTS = {
     "arm": "G1_29",
     "ee": "dex3",
     "iface": "enx98fc84ec937b",
+    "teleop_side": "both",
     "task_dir": "./utils/data/",
     "task_name": "retail",
     "task_desc": "----",
@@ -35,6 +36,8 @@ def add_arguments(parser: object) -> None:
     parser.add_argument("--arm", type=str, choices=["G1_29"], default=DEFAULTS["arm"], help="Select arm controller")
     parser.add_argument("--ee", type=str, choices=["dex3"], default=DEFAULTS["ee"], help="Select end effector controller")
     parser.add_argument("--iface", type=str, default=DEFAULTS["iface"], help="Network interface for DDS")
+    parser.add_argument("--teleop-side", type=str, choices=["left", "right", "both"], default=DEFAULTS["teleop_side"],
+                        help="Limit teleoperation motion to one side while still recording both sides")
 
     # mode flags
     parser.add_argument("--motion", action="store_true", help="Enable motion control mode")

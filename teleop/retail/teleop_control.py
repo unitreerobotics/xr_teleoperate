@@ -47,6 +47,36 @@ RECORD_STOP_META = None # {"subfolder": str} when stopping
 TASK_NAME = None
 TASK_DESC = None
 ITEM_ID = None
+
+LEFT_ARM_SLICE = slice(0, 7)
+RIGHT_ARM_SLICE = slice(7, 14)
+
+
+def side_enabled(teleop_side: str, side: str) -> bool:
+    if teleop_side == "both":
+        return True
+    return teleop_side == side
+
+
+def build_arm_command_for_side(teleop_side: str, current_lr_arm_q: np.ndarray, sol_q: np.ndarray, sol_tauff: np.ndarray):
+    arm_q_cmd = np.array(sol_q, dtype=np.float64, copy=True)
+    arm_tauff_cmd = np.array(sol_tauff, dtype=np.float64, copy=True)
+
+    if not side_enabled(teleop_side, "left"):
+        arm_q_cmd[LEFT_ARM_SLICE] = current_lr_arm_q[LEFT_ARM_SLICE]
+        arm_tauff_cmd[LEFT_ARM_SLICE] = 0.0
+    if not side_enabled(teleop_side, "right"):
+        arm_q_cmd[RIGHT_ARM_SLICE] = current_lr_arm_q[RIGHT_ARM_SLICE]
+        arm_tauff_cmd[RIGHT_ARM_SLICE] = 0.0
+
+    return arm_q_cmd, arm_tauff_cmd
+
+
+def hold_hand_side(hand_msg, joint_indices, hold_q: np.ndarray) -> None:
+    for i, jid in enumerate(joint_indices):
+        hand_msg.motor_cmd[jid].q = float(hold_q[i])
+
+
 def on_press(key):
     global STOP, START, RECORD_TOGGLE, RECORD_STOP_META, RECORD_RUNNING
     if key == 'r':
@@ -96,6 +126,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     logger_mp.info(f"args: {args}")
+    logger_mp.info(f"Teleop side control: {args.teleop_side}")
 
     try:
         # ipc communication. client usage: see utils/ipc.py
@@ -386,7 +417,8 @@ if __name__ == '__main__':
             sol_q, sol_tauff  = arm_ik.solve_ik(tele_data.left_arm_pose, tele_data.right_arm_pose, current_lr_arm_q, current_lr_arm_dq)
             time_ik_end = time.time()
             logger_mp.debug(f"ik:\t{round(time_ik_end - time_ik_start, 6)}")
-            arm_ctrl.ctrl_dual_arm(sol_q, sol_tauff)
+            arm_q_cmd, arm_tauff_cmd = build_arm_command_for_side(args.teleop_side, current_lr_arm_q, sol_q, sol_tauff)
+            arm_ctrl.ctrl_dual_arm(arm_q_cmd, arm_tauff_cmd)
 
             right_trigger = tele_data.tele_state.right_trigger_state
             left_trigger = tele_data.tele_state.left_trigger_state
@@ -593,7 +625,7 @@ if __name__ == '__main__':
                 else:
                     # Trigger released - open hand instantly (no ramping)
                     with right_hand_override.get_lock():
-                        right_hand_override[0] = 0.0
+                        right_hand_override[0] = 0.0 if side_enabled(args.teleop_side, "right") else 1.0
 
                     for i, jid in enumerate(Dex3_1_Right_JointIndex):
                         # Direct open - no ramping for faster release
@@ -686,7 +718,7 @@ if __name__ == '__main__':
                 else:
                     # Trigger released - open hand instantly (no ramping)
                     with left_hand_override.get_lock():
-                        left_hand_override[0] = 0.0
+                        left_hand_override[0] = 0.0 if side_enabled(args.teleop_side, "left") else 1.0
 
                     for i, jid in enumerate(Dex3_1_Left_JointIndex):
                         # Direct open - no ramping for faster release
@@ -698,6 +730,22 @@ if __name__ == '__main__':
                         left_hold_logged[i] = False
                     
                     q14[:7] = left_ramped_target
+
+                with right_hand_override.get_lock():
+                    if not side_enabled(args.teleop_side, "right"):
+                        right_hand_override[0] = 1.0
+                with left_hand_override.get_lock():
+                    if not side_enabled(args.teleop_side, "left"):
+                        left_hand_override[0] = 1.0
+
+                with dual_hand_data_lock:
+                    left_hand_hold_q = np.array(dual_hand_state_array[:7], dtype=np.float64)
+                    right_hand_hold_q = np.array(dual_hand_state_array[-7:], dtype=np.float64)
+
+                if not side_enabled(args.teleop_side, "right"):
+                    hold_hand_side(dex3_right_msg, Dex3_1_Right_JointIndex, right_hand_hold_q)
+                if not side_enabled(args.teleop_side, "left"):
+                    hold_hand_side(dex3_left_msg, Dex3_1_Left_JointIndex, left_hand_hold_q)
 
                 # Publish the commands (q values already set in per-motor loops above)
                 dex3_right_pub.Write(dex3_right_msg)
