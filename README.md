@@ -69,35 +69,35 @@ The currently supported devices in this repository:
     <th align="center">⚪ Status</th>
   </tr>
   <tr>
-    <td align="center"><a href="https://www.unitree.com/cn/g1" target="_blank">G1 (29 DoF)</a></td>
+    <td align="center"><a href="https://www.unitree.com/en/g1" target="_blank">G1 (29 DoF)</a></td>
     <td align="center">✅ Complete</td>
   </tr>
   <tr>
-    <td align="center"><a href="https://www.unitree.com/cn/g1" target="_blank">G1 (23 DoF)</a></td>
+    <td align="center"><a href="https://www.unitree.com/en/g1" target="_blank">G1 (23 DoF)</a></td>
     <td align="center">✅ Complete</td>
   </tr>
   <tr>
-    <td align="center"><a href="https://www.unitree.com/cn/h1" target="_blank">H1 (4‑DoF arm)</a></td>
+    <td align="center"><a href="https://www.unitree.com/en/h1" target="_blank">H1 (4‑DoF arm)</a></td>
     <td align="center">✅ Complete</td>
   </tr>
   <tr>
-    <td align="center"><a href="https://www.unitree.com/cn/h1" target="_blank">H1_2 (7‑DoF arm)</a></td>
+    <td align="center"><a href="https://www.unitree.com/en/h1" target="_blank">H1_2 (7‑DoF arm)</a></td>
     <td align="center">✅ Complete</td>
   </tr>
   <tr>
-    <td align="center"><a href="https://www.unitree.com/cn/Dex1-1" target="_blank">Dex1‑1 gripper</a></td>
+    <td align="center"><a href="https://www.unitree.com/en/Dex1-1" target="_blank">Dex1‑1 gripper</a></td>
     <td align="center">✅ Complete</td>
   </tr>
   <tr>
-    <td align="center"><a href="https://www.unitree.com/cn/Dex3-1" target="_blank">Dex3‑1 dexterous hand</a></td>
+    <td align="center"><a href="https://www.unitree.com/en/Dex3-1" target="_blank">Dex3‑1 dexterous hand</a></td>
     <td align="center">✅ Complete</td>
   </tr>
   <tr>
-    <td align="center"><a href="https://support.unitree.com/home/zh/G1_developer/inspire_dfx_dexterous_hand" target="_blank">Inspire dexterous hand</a></td>
+    <td align="center"><a href="https://support.unitree.com/home/en/G1_developer/inspire_dfx_dexterous_hand" target="_blank">Inspire dexterous hand</a></td>
     <td align="center">✅ Complete</td>
   </tr>
   <tr>
-    <td style="text-align: center;"> <a href="https://www.brainco-hz.com/docs/revolimb-hand/" target="_blank"> BrainCo dexterous hand </td>
+    <td style="text-align: center;"> <a href="https://www.brainco-hz.com/docs/revolimb-hand/en/revo2/parameters.html" target="_blank"> BrainCo dexterous hand </td>
     <td style="text-align: center;"> &#9989; Complete </td>
   </tr>
   <tr>
@@ -112,7 +112,7 @@ The currently supported devices in this repository:
 
 We tested our code on Ubuntu 20.04 and Ubuntu 22.04, other operating systems may be configured differently. This document primarily describes the **default mode**.
 
-For more information, you can refer to [Official Documentation ](https://support.unitree.com/home/zh/Teleoperation) and [OpenTeleVision](https://github.com/OpenTeleVision/TeleVision).
+For more information, you can refer to [Official Documentation ](https://support.unitree.com/home/en/Teleoperation) and [OpenTeleVision](https://github.com/OpenTeleVision/TeleVision).
 
 ## 1.1 📥 basic
 
@@ -406,9 +406,9 @@ In the simulation environment, the image service is automatically enabled. For p
 
 > **Note 1**: Skip this if your config does not use the Inspire hand.
 >
-> **Note 2**: For G1 robot with [Inspire DFX hand](https://support.unitree.com/home/zh/G1_developer/inspire_dfx_dexterous_hand), related issue [#46](https://github.com/unitreerobotics/xr_teleoperate/issues/46).
+> **Note 2**: For G1 robot with [Inspire DFX hand](https://support.unitree.com/home/en/G1_developer/inspire_dfx_dexterous_hand), related issue [#46](https://github.com/unitreerobotics/xr_teleoperate/issues/46).
 >
-> **Note 3**: For [Inspire FTP hand]((https://support.unitree.com/home/zh/G1_developer/inspire_ftp_dexterity_hand)), related issue [#48](https://github.com/unitreerobotics/xr_teleoperate/issues/48). FTP dexterous hand is now supported. Please refer to the `--ee` parameter for configuration.
+> **Note 3**: For [Inspire FTP hand]((https://support.unitree.com/home/en/G1_developer/inspire_ftp_dexterity_hand)), related issue [#48](https://github.com/unitreerobotics/xr_teleoperate/issues/48). FTP dexterous hand is now supported. Please refer to the `--ee` parameter for configuration.
 
 First, use [this URL: DFX_inspire_service](https://github.com/unitreerobotics/DFX_inspire_service) to clone the dexterous hand control interface program. And Copy it to **PC2** of  Unitree robots. 
 
@@ -447,7 +447,7 @@ Please refer to the [Repo README](https://github.com/unitreerobotics/dex1_1_serv
 >  ![Warning](https://img.shields.io/badge/Warning-Important-red)
 >
 >  1. Everyone must keep a safe distance from the robot to prevent any potential danger!
->  2. Please make sure to read the [Official Documentation](https://support.unitree.com/home/zh/Teleoperation) at least once before running this program.
+>  2. Please make sure to read the [Official Documentation](https://support.unitree.com/home/en/Teleoperation) at least once before running this program.
 >  3. To use motion mode (with `--motion`), ensure the robot is in control mode (via [R3 remote](https://www.unitree.com/R3)).
 >  5. In motion mode:
 >    - Right controller **A** = Exit teleop
