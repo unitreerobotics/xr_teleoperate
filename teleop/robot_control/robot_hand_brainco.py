@@ -20,7 +20,7 @@ kTopicbraincoRightState = "rt/brainco/right/state"
 
 class Brainco_Controller:
     def __init__(self, left_hand_array, right_hand_array, dual_hand_data_lock = None, dual_hand_state_array = None,
-                       dual_hand_action_array = None, fps = 100.0, Unit_Test = False, simulation_mode = False):
+                       dual_hand_action_array = None, hand_home_value = None, fps = 100.0, Unit_Test = False, simulation_mode = False):
         logger_mp.info("Initialize Brainco_Controller...")
         self.fps = fps
         self.hand_sub_ready = False
@@ -58,8 +58,8 @@ class Brainco_Controller:
             logger_mp.warning("[brainco_Controller] Waiting to subscribe dds...")
         logger_mp.info("[brainco_Controller] Subscribe dds ok.")
 
-        hand_control_process = Process(target=self.control_process, args=(left_hand_array, right_hand_array,  self.left_hand_state_array, self.right_hand_state_array,
-                                                                          dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array))
+        hand_control_process = Process(target=self.control_process, args=(left_hand_array, right_hand_array, self.left_hand_state_array, self.right_hand_state_array,
+                                                                          dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, hand_home_value))
         hand_control_process.daemon = True
         hand_control_process.start()
 
@@ -93,7 +93,8 @@ class Brainco_Controller:
         # logger_mp.debug("hand ctrl publish ok.")
     
     def control_process(self, left_hand_array, right_hand_array, left_hand_state_array, right_hand_state_array,
-                              dual_hand_data_lock = None, dual_hand_state_array = None, dual_hand_action_array = None):
+                              dual_hand_data_lock = None, dual_hand_state_array = None, dual_hand_action_array = None,
+                              hand_home_value = None):
         self.running = True
 
         left_q_target  = np.full(brainco_Num_Motors, 0)
@@ -124,7 +125,15 @@ class Brainco_Controller:
                 # Read left and right q_state from shared arrays
                 state_data = np.concatenate((np.array(left_hand_state_array[:]), np.array(right_hand_state_array[:])))
 
-                if not np.all(right_hand_data == 0.0) and not np.all(left_hand_data[4] == np.array([-1.13, 0.3, 0.15])): # if hand data has been initialized.
+                hand_home = False
+                if hand_home_value is not None:
+                    with hand_home_value.get_lock():
+                        hand_home = bool(hand_home_value.value)
+
+                if hand_home:
+                    left_q_target = np.zeros(brainco_Num_Motors)
+                    right_q_target = np.zeros(brainco_Num_Motors)
+                elif not np.all(right_hand_data == 0.0) and not np.all(left_hand_data[4] == np.array([-1.13, 0.3, 0.15])): # if hand data has been initialized.
                     ref_left_value = left_hand_data[self.hand_retargeting.left_indices[1,:]] - left_hand_data[self.hand_retargeting.left_indices[0,:]]
                     ref_right_value = right_hand_data[self.hand_retargeting.right_indices[1,:]] - right_hand_data[self.hand_retargeting.right_indices[0,:]]
 

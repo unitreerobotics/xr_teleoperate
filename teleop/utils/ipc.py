@@ -7,7 +7,7 @@ logger_mp = logging_mp.getLogger(__name__)
 
 """
 # Client → Server (Request)
-1) launch
+1) tracking start / pause / resume
     {
         "reqid": unique id,
         "cmd": "CMD_START"
@@ -47,6 +47,8 @@ logger_mp = logging_mp.getLogger(__name__)
     {
         "START": True | False,          # whether robot follow vr
         "STOP" : True | False,          # whether exit program
+        "HOMING": True | False,         # whether arms are returning to default pose
+        "PAUSED": True | False,         # whether tracking is paused at default pose
         "RECORD_RUNNING": True | False, # whether is recording
         "RECORD_READY": True | False,   # whether ready to record
     }
@@ -61,7 +63,7 @@ class IPC_Server:
     """
     # Mapping table for on_press keys
     cmd_map = {
-        "CMD_START": "r",          # launch
+        "CMD_START": "r",          # start / pause / resume tracking
         "CMD_STOP": "q",           # exit
         "CMD_RECORD_TOGGLE": "s",  # start & stop (toggle record)
     }
@@ -328,7 +330,7 @@ if __name__ == "__main__":
             return
 
         if key == "r":
-            logger_mp.info("▶️ Sending launch command...")
+            logger_mp.info("▶️ Sending tracking toggle command...")
             rep = client.send_data("CMD_START")
             logger_mp.info("Reply: %s", rep)
 
@@ -360,7 +362,7 @@ if __name__ == "__main__":
     listen_keyboard_thread = threading.Thread(target=listen_keyboard, kwargs={"on_press": on_press, "until": None, "sequential": False}, daemon=True)
     listen_keyboard_thread.start()
 
-    logger_mp.info("✅ Client started, waiting for keyboard input:\n [r] launch, [s] start/stop record, [b] heartbeat, [q] exit")
+    logger_mp.info("✅ Client started, waiting for keyboard input:\n [r] start/pause/resume tracking, [s] start/stop record, [b] heartbeat, [q] exit")
     try:
         while True:
             time.sleep(1.0)
