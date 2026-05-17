@@ -2,6 +2,7 @@ import time
 import argparse
 from multiprocessing import Value, Array, Lock
 import threading
+import numpy as np
 import logging_mp
 logging_mp.basicConfig(level=logging_mp.INFO)
 logger_mp = logging_mp.getLogger(__name__)
@@ -31,11 +32,18 @@ def publish_reset_category(category: int, publisher): # Scene Reset signal
     logger_mp.info(f"published reset category: {category}")
 
 # state transition
-START          = False  # Enable to start robot following VR user motion
+START          = False  # True while robot follows VR user motion.
 STOP           = False  # Enable to begin system exit procedure
+HOMING         = False  # True while paused tracking is returning arms to the default pose.
+PAUSED         = False  # True after arms have reached the default pose and tracking is stopped.
+PAUSE_REQUESTED  = False
+RESUME_REQUESTED = False
+RESUME_SKIP_FRAMES = 0
 READY          = False  # Ready to (1) enter START state, (2) enter RECORD_RUNNING state
 RECORD_RUNNING = False  # True if [Recording]
 RECORD_TOGGLE  = False  # Toggle recording state
+HOME_TOLERANCE = 0.05
+RESUME_SETTLE_FRAMES = 5
 #  -------        ---------                -----------                -----------            ---------
 #   state          [Ready]      ==>        [Recording]     ==>         [AutoSave]     -->     [Ready]
 #  -------        ---------      |         -----------      |         -----------      |     ---------
@@ -49,24 +57,73 @@ RECORD_TOGGLE  = False  # Toggle recording state
 #  --> auto  : Auto-transition after saving data.
 
 def on_press(key):
-    global STOP, START, RECORD_TOGGLE
+    global STOP, START, HOMING, PAUSED, PAUSE_REQUESTED, RESUME_REQUESTED, RECORD_TOGGLE
     if key == 'r':
-        START = True
+        if START:
+            START = False
+            PAUSE_REQUESTED = True
+        elif PAUSED:
+            PAUSED = False
+            START = True
+            RESUME_REQUESTED = True
+        elif HOMING or PAUSE_REQUESTED:
+            logger_mp.warning("[on_press] Already homing arms. Press [r] again after pause is ready.")
+        else:
+            START = True
     elif key == 'q':
         START = False
+        PAUSED = False
+        HOMING = False
+        PAUSE_REQUESTED = False
+        RESUME_REQUESTED = False
         STOP = True
-    elif key == 's' and START == True:
+    elif key == 's' and START == True and not PAUSED and not HOMING:
         RECORD_TOGGLE = True
     else:
         logger_mp.warning(f"[on_press] {key} was pressed, but no action is defined for this key.")
 
+def reset_arm_ik_state(arm_ik, current_q):
+    if current_q is None:
+        return
+    current_q = np.array(current_q, copy=True)
+    if hasattr(arm_ik, "init_data"):
+        arm_ik.init_data = current_q
+    smooth_filter = getattr(arm_ik, "smooth_filter", None)
+    if smooth_filter is not None:
+        if hasattr(smooth_filter, "_data_queue"):
+            smooth_filter._data_queue = []
+        if hasattr(smooth_filter, "_filtered_data"):
+            smooth_filter._filtered_data = current_q.copy()
+
+def sleep_to_frequency(start_time, frequency):
+    current_time = time.time()
+    time_elapsed = current_time - start_time
+    sleep_time = max(0, (1 / frequency) - time_elapsed)
+    time.sleep(sleep_time)
+    return sleep_time
+
+def stop_locomotion(loco_wrapper):
+    try:
+        loco_wrapper.Move(0.0, 0.0, 0.0)
+    except Exception as e:
+        logger_mp.error(f"Failed to stop locomotion: {e}")
+
+def set_shared_bool(shared_value, value):
+    if shared_value is None:
+        return
+    with shared_value.get_lock():
+        shared_value.value = value
+
 def get_state() -> dict:
     """Return current heartbeat state"""
-    global START, STOP, RECORD_RUNNING, READY
+    global START, STOP, HOMING, PAUSED, RECORD_RUNNING, READY
     return {
         "START": START,
         "STOP": STOP,
+        "HOMING": HOMING,
+        "PAUSED": PAUSED,
         "READY": READY,
+        "RECORD_READY": READY,
         "RECORD_RUNNING": RECORD_RUNNING,
     }
 
@@ -158,6 +215,7 @@ if __name__ == '__main__':
             arm_ctrl = H1_ArmController(simulation_mode=args.sim)
 
         # end-effector
+        hand_home_value = None
         if args.ee == "dex3":
             from teleop.robot_control.robot_hand_unitree import Dex3_1_Controller
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
@@ -199,8 +257,9 @@ if __name__ == '__main__':
             dual_hand_data_lock = Lock()
             dual_hand_state_array = Array('d', 12, lock = False)   # [output] current left, right hand state(12) data.
             dual_hand_action_array = Array('d', 12, lock = False)  # [output] current left, right hand action(12) data.
+            hand_home_value = Value('b', False, lock=True)          # [input] open hands during tracking pause.
             hand_ctrl = Brainco_Controller(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, 
-                                           dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim)
+                                           dual_hand_state_array, dual_hand_action_array, hand_home_value=hand_home_value, simulation_mode=args.sim)
         else:
             pass
         
@@ -240,7 +299,9 @@ if __name__ == '__main__':
                                      rerun_log = not args.headless)
 
         logger_mp.info("----------------------------------------------------------------")
-        logger_mp.info("🟢  Press [r] to start syncing the robot with your movements.")
+        logger_mp.info("🟢  Press [r] to start tracking.")
+        logger_mp.info("⏸️  While tracking, press [r] to pause tracking and home the arms.")
+        logger_mp.info("▶️  While paused, align with the robot default pose and press [r] to resume tracking.")
         if args.record:
             logger_mp.info("🟡  Press [s] to START or SAVE recording (toggle cycle).")
         else:
@@ -286,6 +347,57 @@ if __name__ == '__main__':
                     if args.sim:
                         publish_reset_category(1, reset_pose_publisher)
 
+            if PAUSE_REQUESTED:
+                PAUSE_REQUESTED = False
+                HOMING = True
+                RECORD_TOGGLE = False
+                if args.record and RECORD_RUNNING:
+                    RECORD_RUNNING = False
+                    recorder.save_episode()
+                    if args.sim:
+                        publish_reset_category(1, reset_pose_publisher)
+                set_shared_bool(hand_home_value, True)
+                if args.input_mode == "controller" and args.motion:
+                    stop_locomotion(loco_wrapper)
+                logger_mp.info("-----------------pause Tracking, homing arms--------------------")
+
+            if HOMING:
+                if args.input_mode == "controller" and args.motion:
+                    stop_locomotion(loco_wrapper)
+                current_lr_arm_q = arm_ctrl.get_current_dual_arm_q()
+                home_q = np.zeros_like(current_lr_arm_q)
+                arm_ctrl.ctrl_dual_arm(home_q, np.zeros_like(home_q))
+                if np.all(np.abs(current_lr_arm_q) < HOME_TOLERANCE):
+                    HOMING = False
+                    PAUSED = True
+                    reset_arm_ik_state(arm_ik, current_lr_arm_q)
+                    logger_mp.info("---------------paused: arms at default pose---------------------")
+                    logger_mp.info("Align with the robot, then press [r] to resume tracking.")
+                sleep_time = sleep_to_frequency(start_time, args.frequency)
+                logger_mp.debug(f"main process sleep: {sleep_time}")
+                continue
+
+            if PAUSED:
+                if args.input_mode == "controller" and args.motion:
+                    stop_locomotion(loco_wrapper)
+                sleep_time = sleep_to_frequency(start_time, args.frequency)
+                logger_mp.debug(f"main process sleep: {sleep_time}")
+                continue
+
+            if RESUME_REQUESTED:
+                RESUME_REQUESTED = False
+                RESUME_SKIP_FRAMES = RESUME_SETTLE_FRAMES
+                reset_arm_ik_state(arm_ik, arm_ctrl.get_current_dual_arm_q())
+                arm_ctrl.speed_gradual_max(t=2.0)
+                logger_mp.info("---------------------resume Tracking----------------------------")
+
+            if RESUME_SKIP_FRAMES > 0:
+                tv_wrapper.get_tele_data()
+                RESUME_SKIP_FRAMES -= 1
+                sleep_time = sleep_to_frequency(start_time, args.frequency)
+                logger_mp.debug(f"main process sleep: {sleep_time}")
+                continue
+
             # get xr's tele data
             tele_data = tv_wrapper.get_tele_data()
             if (args.ee == "dex3" or args.ee == "inspire_dfx" or args.ee == "inspire_ftp" or args.ee == "brainco") and args.input_mode == "hand":
@@ -293,6 +405,7 @@ if __name__ == '__main__':
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
                 with right_hand_pos_array.get_lock():
                     right_hand_pos_array[:] = tele_data.right_hand_pos.flatten()
+                set_shared_bool(hand_home_value, False)
             elif args.ee == "dex1" and args.input_mode == "controller":
                 with left_gripper_value.get_lock():
                     left_gripper_value.value = tele_data.left_ctrl_triggerValue
@@ -314,7 +427,7 @@ if __name__ == '__main__':
                     STOP = True
                 # command robot to enter damping mode. soft emergency stop function
                 if tele_data.left_ctrl_thumbstick and tele_data.right_ctrl_thumbstick:
-                    loco_wrapper.Damp()
+                    loco_wrapper.Enter_Damp_Mode()
                 # https://github.com/unitreerobotics/xr_teleoperate/issues/135, control, limit velocity to within 0.3
                 loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
                                   -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
@@ -472,10 +585,7 @@ if __name__ == '__main__':
                     else:
                         recorder.add_item(colors=colors, depths=depths, states=states, actions=actions)
 
-            current_time = time.time()
-            time_elapsed = current_time - start_time
-            sleep_time = max(0, (1 / args.frequency) - time_elapsed)
-            time.sleep(sleep_time)
+            sleep_time = sleep_to_frequency(start_time, args.frequency)
             logger_mp.debug(f"main process sleep: {sleep_time}")
 
     except KeyboardInterrupt:
