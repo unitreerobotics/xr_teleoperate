@@ -257,7 +257,7 @@ class Inspire_Controller_FTP:
         if not hasattr(self, "_debug_count"):
             self._debug_count = 0
         if self._debug_count < 50:
-            logger_mp.info(f"[Inspire_Controller_FTP] Publish cmd L={left_angle_cmd_scaled} R={right_angle_cmd_scaled} ")
+            # logger_mp.info(f"[Inspire_Controller_FTP] Publish cmd L={left_angle_cmd_scaled} R={right_angle_cmd_scaled} ")
             self._debug_count += 1
 
 

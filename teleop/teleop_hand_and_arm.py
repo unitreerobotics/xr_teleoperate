@@ -11,6 +11,10 @@ import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
+import os
+import numpy as np
+
+from dex_retargeting.robot_wrapper import RobotWrapper
 
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize # dds 
 from televuer import TeleVuerWrapper
@@ -47,6 +51,40 @@ RECORD_TOGGLE  = False  # Toggle recording state
 #  -------        ---------                -----------                 -----------            ---------
 #  ==> manual: when READY is True, set RECORD_TOGGLE=True to transition.
 #  --> auto  : Auto-transition after saving data.
+
+def mat_to_xyz_quat_xyzw(T):  #hdj
+    T = np.asarray(T, dtype=np.float64)
+    R = T[:3, :3]
+    t = T[:3, 3]
+
+    tr = R[0,0] + R[1,1] + R[2,2]
+    if tr > 0:
+        S = np.sqrt(tr + 1.0) * 2
+        qw = 0.25 * S
+        qx = (R[2,1] - R[1,2]) / S
+        qy = (R[0,2] - R[2,0]) / S
+        qz = (R[1,0] - R[0,1]) / S
+    elif (R[0,0] > R[1,1]) and (R[0,0] > R[2,2]):
+        S = np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2]) * 2
+        qw = (R[2,1] - R[1,2]) / S
+        qx = 0.25 * S
+        qy = (R[0,1] + R[1,0]) / S
+        qz = (R[0,2] + R[2,0]) / S
+    elif R[1,1] > R[2,2]:
+        S = np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2]) * 2
+        qw = (R[0,2] - R[2,0]) / S
+        qx = (R[0,1] + R[1,0]) / S
+        qy = 0.25 * S
+        qz = (R[1,2] + R[2,1]) / S
+    else:
+        S = np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1]) * 2
+        qw = (R[1,0] - R[0,1]) / S
+        qx = (R[0,2] + R[2,0]) / S
+        qy = (R[1,2] + R[2,1]) / S
+        qz = 0.25 * S
+
+    return [float(t[0]), float(t[1]), float(t[2]),
+            float(qx), float(qy), float(qz), float(qw)]
 
 def on_press(key):
     global STOP, START, RECORD_TOGGLE
@@ -89,7 +127,7 @@ if __name__ == '__main__':
     # record mode and task info
     parser.add_argument('--record', action = 'store_true', help = 'Enable data recording mode')
     parser.add_argument('--task-dir', type = str, default = './utils/data/', help = 'path to save data')
-    parser.add_argument('--task-name', type = str, default = 'pick cube', help = 'task file name for recording')
+    parser.add_argument('--task-name', type = str, default = 'pick_cube', help = 'task file name for recording')
     parser.add_argument('--task-goal', type = str, default = 'pick up cube.', help = 'task goal for recording at json file')
     parser.add_argument('--task-desc', type = str, default = 'task description', help = 'task description for recording at json file')
     parser.add_argument('--task-steps', type = str, default = 'step1: do this; step2: do that;', help = 'task steps for recording at json file')
@@ -187,6 +225,7 @@ if __name__ == '__main__':
             dual_hand_state_array = Array('d', 12, lock = False)   # [output] current left, right hand state(12) data.
             dual_hand_action_array = Array('d', 12, lock = False)  # [output] current left, right hand action(12) data.
             hand_ctrl = Inspire_Controller_DFX(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim)
+            
         elif args.ee == "inspire_ftp":
             from teleop.robot_control.robot_hand_inspire import Inspire_Controller_FTP
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
@@ -195,6 +234,40 @@ if __name__ == '__main__':
             dual_hand_state_array = Array('d', 12, lock = False)   # [output] current left, right hand state(12) data.
             dual_hand_action_array = Array('d', 12, lock = False)  # [output] current left, right hand action(12) data.
             hand_ctrl = Inspire_Controller_FTP(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim)
+
+
+            assert len(states["left_wrist_pose"]["qpos"]) == 7
+            assert len(actions["left_wrist_pose"]["qpos"]) == 7
+            assert all(np.isfinite(states["left_wrist_pose"]["qpos"]))
+            assert all(np.isfinite(actions["left_wrist_pose"]["qpos"]))
+        # ==== FK init (once, only for inspire_ftp) ====
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            urdf_path = os.path.join(repo_root, "assets", "g1", "g1_body29_hand14.urdf")
+            fk_robot = RobotWrapper(urdf_path)
+
+            LEFT_WRIST_FRAME_NAME  = "left_wrist_yaw_link"
+            RIGHT_WRIST_FRAME_NAME = "right_wrist_yaw_link"
+            left_wrist_id  = fk_robot.get_link_index(LEFT_WRIST_FRAME_NAME)
+            right_wrist_id = fk_robot.get_link_index(RIGHT_WRIST_FRAME_NAME)
+
+            dof_names = fk_robot.dof_joint_names
+            name2idx = {n: i for i, n in enumerate(dof_names)}
+
+            LEFT_ARM_DOF = [
+                "left_shoulder_pitch_joint","left_shoulder_roll_joint","left_shoulder_yaw_joint",
+                "left_elbow_joint",
+                "left_wrist_roll_joint","left_wrist_pitch_joint","left_wrist_yaw_joint",
+            ]
+            RIGHT_ARM_DOF = [
+                "right_shoulder_pitch_joint","right_shoulder_roll_joint","right_shoulder_yaw_joint",
+                "right_elbow_joint",
+                "right_wrist_roll_joint","right_wrist_pitch_joint","right_wrist_yaw_joint",
+            ]
+
+            logger_mp.info(f"[FK] using frames: L={LEFT_WRIST_FRAME_NAME}, R={RIGHT_WRIST_FRAME_NAME}")
+            logger_mp.info(f"[FK] dof joints: {dof_names}")
+
+
         elif args.ee == "brainco":
             from teleop.robot_control.robot_hand_brainco import Brainco_Controller
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
@@ -332,6 +405,7 @@ if __name__ == '__main__':
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
             current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
+            # logger_mp.info(f"[ARM_Q] type={type(current_lr_arm_q)} len={len(current_lr_arm_q) if hasattr(current_lr_arm_q,'__len__') else None} q0={current_lr_arm_q[0] if hasattr(current_lr_arm_q,'__len__') and len(current_lr_arm_q)>0 else None}")
 
             # solve ik using motor data and wrist pose, then use ik results to control arms.
             time_ik_start = time.time()
@@ -425,60 +499,61 @@ if __name__ == '__main__':
                                 colors[f"color_{2}"] = right_wrist_img.bgr
                             else:
                                 logger_mp.warning("Right wrist image is None!")
+                
+
+
+                    # ==== wrist pose default (always exist, avoid None) ====
+                    left_wrist_pose_7d_cur  = []
+                    right_wrist_pose_7d_cur = []
+                    left_wrist_pose_7d_cmd  = []
+                    right_wrist_pose_7d_cmd = []
+
+                    if args.ee == "inspire_ftp":
+                        # 1) command wrist pose (from XR tele target)
+                        left_wrist_pose_7d_cmd  = mat_to_xyz_quat_xyzw(tele_data.left_wrist_pose)
+                        right_wrist_pose_7d_cmd = mat_to_xyz_quat_xyzw(tele_data.right_wrist_pose)
+
+                        # 2) current wrist pose (FK from current arm joints)
+                        q = fk_robot.q0.copy()
+                        for jn, val in zip(LEFT_ARM_DOF, left_arm_state):
+                            if jn in name2idx:
+                                q[name2idx[jn]] = float(val)
+                        for jn, val in zip(RIGHT_ARM_DOF, right_arm_state):
+                            if jn in name2idx:
+                                q[name2idx[jn]] = float(val)
+
+                        fk_robot.compute_forward_kinematics(q)
+                        T_left  = fk_robot.get_link_pose(left_wrist_id)
+                        T_right = fk_robot.get_link_pose(right_wrist_id)
+
+                        left_wrist_pose_7d_cur  = mat_to_xyz_quat_xyzw(T_left)
+                        right_wrist_pose_7d_cur = mat_to_xyz_quat_xyzw(T_right)
                     states = {
-                        "left_arm": {                                                                    
-                            "qpos":   left_arm_state.tolist(),    # numpy.array -> list
-                            "qvel":   [],                          
-                            "torque": [],                        
-                        }, 
-                        "right_arm": {                                                                    
-                            "qpos":   right_arm_state.tolist(),       
-                            "qvel":   [],                          
-                            "torque": [],                         
-                        },                        
-                        "left_ee": {                                                                    
-                            "qpos":   left_ee_state,           
-                            "qvel":   [],                           
-                            "torque": [],                          
-                        }, 
-                        "right_ee": {                                                                    
-                            "qpos":   right_ee_state,       
-                            "qvel":   [],                           
-                            "torque": [],  
-                        }, 
-                        "body": {
-                            "qpos": current_body_state,
-                        }, 
+                        "left_arm":  {"qpos": left_arm_state.tolist(),  "qvel": [], "torque": []},
+                        "right_arm": {"qpos": right_arm_state.tolist(), "qvel": [], "torque": []},
+                        "left_ee":   {"qpos": left_ee_state,            "qvel": [], "torque": []},
+                        "right_ee":  {"qpos": right_ee_state,           "qvel": [], "torque": []},
+                        "body":      {"qpos": current_body_state},
                     }
+
                     actions = {
-                        "left_arm": {                                   
-                            "qpos":   left_arm_action.tolist(),       
-                            "qvel":   [],       
-                            "torque": [],      
-                        }, 
-                        "right_arm": {                                   
-                            "qpos":   right_arm_action.tolist(),       
-                            "qvel":   [],       
-                            "torque": [],       
-                        },                         
-                        "left_ee": {                                   
-                            "qpos":   left_hand_action,       
-                            "qvel":   [],       
-                            "torque": [],       
-                        }, 
-                        "right_ee": {                                   
-                            "qpos":   right_hand_action,       
-                            "qvel":   [],       
-                            "torque": [], 
-                        }, 
-                        "body": {
-                            "qpos": current_body_action,
-                        }, 
+                        "left_arm":  {"qpos": left_arm_action.tolist(),  "qvel": [], "torque": []},
+                        "right_arm": {"qpos": right_arm_action.tolist(), "qvel": [], "torque": []},
+                        "left_ee":   {"qpos": left_hand_action,          "qvel": [], "torque": []},
+                        "right_ee":  {"qpos": right_hand_action,         "qvel": [], "torque": []},
+                        "body":      {"qpos": current_body_action},
                     }
+
+                    if args.ee == "inspire_ftp":
+                        states["left_wrist_pose"]  = {"qpos": left_wrist_pose_7d_cur,  "qvel": [], "torque": []}
+                        states["right_wrist_pose"] = {"qpos": right_wrist_pose_7d_cur, "qvel": [], "torque": []}
+                        actions["left_wrist_pose"]  = {"qpos": left_wrist_pose_7d_cmd,  "qvel": [], "torque": []}
+                        actions["right_wrist_pose"] = {"qpos": right_wrist_pose_7d_cmd, "qvel": [], "torque": []}
                     if args.sim:
                         sim_state = sim_state_subscriber.read_data()            
                         recorder.add_item(colors=colors, depths=depths, states=states, actions=actions, sim_state=sim_state)
                     else:
+                        logger_mp.info(f"[ADD_ITEM] states.left_arm.qpos.len={len(states['left_arm']['qpos'])} right_arm.qpos.len={len(states['right_arm']['qpos'])}")
                         recorder.add_item(colors=colors, depths=depths, states=states, actions=actions)
 
             current_time = time.time()
