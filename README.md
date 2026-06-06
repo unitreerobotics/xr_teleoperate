@@ -129,6 +129,8 @@ For more information, you can refer to [Official Documentation ](https://support
 (tv) unitree@Host:~$ cd xr_teleoperate
 # Shallow clone submodule
 (tv) unitree@Host:~/xr_teleoperate$ git submodule update --init --depth 1
+# Install supplemental Python dependencies listed by this repo
+(tv) unitree@Host:~/xr_teleoperate$ pip install -r requirements.txt
 ```
 
 ```bash
@@ -273,7 +275,7 @@ Assuming hand tracking with G1(29 DoF) + Dex3 in simulation with recording:
 
 ```bash
 (tv) unitree@Host:~$ cd ~/xr_teleoperate/teleop/
-(tv) unitree@Host:~/xr_teleoperate/teleop/$ python teleop_hand_and_arm.py --xr-mode=hand --arm=G1_29 --ee=dex3 --sim --record
+(tv) unitree@Host:~/xr_teleoperate/teleop/$ python teleop_hand_and_arm.py --input-mode=hand --arm=G1_29 --ee=dex3 --sim --record
 # Simplified (defaults apply):
 (tv) unitree@Host:~/xr_teleoperate/teleop/$ python teleop_hand_and_arm.py --ee=dex3 --sim --record
 ```
