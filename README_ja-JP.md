@@ -122,7 +122,7 @@ Ubuntu 20.04と22.04でテスト済みです。他のOSでは設定が異なる�
 # Install dex-retargeting submodule
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ cd ../robot_control/dex-retargeting/
 (tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ pip install -e .
-# Install additional dependencies required by this repo
+# Install supplemental Python dependencies listed by this repo
 (tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ cd ../../../
 (tv) unitree@Host:~/xr_teleoperate$ pip install -r requirements.txt
 ```
@@ -177,7 +177,7 @@ G1(29 DoF)とDex3ハンド構成でシミュレーションを起動:
 
 | ⚙️ パラメータ |                📜 説明                |                         🔘 オプション                         | 📌 デフォルト |
 | :----------: | :----------------------------------: | :----------------------------------------------------------: | :----------: |
-| `--xr-mode`  |           XR入力モード選択           | `hand` (**ハンドトラッキング**) `controller` (**コントローラートラッキング**) |    `hand`    |
+| `--input-mode`  |           XR入力モード選択           | `hand` (**ハンドトラッキング**) `controller` (**コントローラートラッキング**) |    `hand`    |
 |   `--arm`    | ロボットアームタイプ選択 (0. 📖 参照) |                 `G1_29` `G1_23` `H1_2` `H1`                  |   `G1_29`    |
 |    `--ee`    |   エンドエフェクタ選択 (0. 📖 参照)   |                   `dex1` `dex3` `inspire1`                   |     none     |
 
@@ -194,7 +194,7 @@ G1(29 DoF) + Dex3でハンドトラッキング、シミュレーション、記
 
 ```bash
 (tv) unitree@Host:~$ cd ~/xr_teleoperate/teleop/
-(tv) unitree@Host:~/xr_teleoperate/teleop/$ python teleop_hand_and_arm.py --xr-mode=hand --arm=G1_29 --ee=dex3 --sim --record
+(tv) unitree@Host:~/xr_teleoperate/teleop/$ python teleop_hand_and_arm.py --input-mode=hand --arm=G1_29 --ee=dex3 --sim --record
 # 簡略化（デフォルト適用）:
 (tv) unitree@Host:~/xr_teleoperate/teleop/$ python teleop_hand_and_arm.py --ee=dex3 --sim --record
 ```
