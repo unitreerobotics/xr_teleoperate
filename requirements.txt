@@ -1,4 +1,0 @@
-matplotlib==3.7.5
-rerun-sdk==0.20.1
-meshcat==0.3.2
-sshkeyboard==2.3.1
