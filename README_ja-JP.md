@@ -103,7 +103,29 @@ Ubuntu 20.04と22.04でテスト済みです。他のOSでは設定が異なる�
 
 詳細は[公式ドキュメント](https://support.unitree.com/home/zh/Teleoperation)と[OpenTeleVision](https://github.com/OpenTeleVision/TeleVision)を参照してください。
 
-## 1.1 📥 基本設定
+## 1.0 ⚡ [pixi](https://pixi.sh) によるクイックインストール（推奨）
+
+このリポジトリには `pixi.toml` と `pyproject.toml` が含まれているため、[pixi](https://pixi.sh) を使えば1つのコマンドで環境全体をセットアップできます。conda-forge の C++ ライブラリ（`pinocchio`、`casadi`、`numpy`、`cyclonedds`）とサブモジュール（`teleimager`、`televuer`、`dex-retargeting`）を自動で解決します。`linux-64` と `linux-aarch64`（ロボット内の Jetson など）に対応しています。
+
+```bash
+# pixi のインストール（https://pixi.sh 参照）: curl -fsSL https://pixi.sh/install.sh | bash
+git clone https://github.com/unitreerobotics/xr_teleoperate.git
+cd xr_teleoperate
+git submodule update --init --depth 1        # パス依存関係にサブモジュールのツリーが必要
+pixi install                                 # 環境の作成: conda ライブラリ + 編集可能なサブモジュール
+pixi shell                                   # 環境に入り、通常通り teleop を実行
+```
+
+> **`unitree_sdk2py`（ロボット通信）。** `linux-64` では pixi が git から自動的に取得・インストールします。`cyclonedds==0.10.2` を固定しており、`linux-aarch64` 向けのホイールがないため、**Jetson（aarch64）** ではデバイス上で pixi が提供する `cyclonedds` C ライブラリに対してビルドする必要があります：
+> ```bash
+> # Jetson 上の `pixi shell` 内で実行:
+> export CYCLONEDDS_HOME="$CONDA_PREFIX"
+> pip install --no-build-isolation "git+https://github.com/unitreerobotics/unitree_sdk2_python.git"
+> ```
+>
+> pixi の代わりに手動で conda をセットアップする場合は、セクション 1.1、1.2 と 1.3 の手順（`unitree_sdk2_python` の手動インストールを含む）に従ってください。
+
+## 1.1 📥 Conda 環境
 
 ```bash
 # Create a conda environment
@@ -114,20 +136,68 @@ Ubuntu 20.04と22.04でテスト済みです。他のOSでは設定が異なる�
 (tv) unitree@Host:~$ cd xr_teleoperate
 # Shallow clone submodule
 (tv) unitree@Host:~/xr_teleoperate$ git submodule update --init --depth 1
+```
+
+```bash
+# Install teleimager submodule
+(tv) unitree@Host:~/xr_teleoperate$ cd teleop/teleimager
+(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ pip install -e . --no-deps
+```
+
+```bash
 # Install televuer submodule
 (tv) unitree@Host:~/xr_teleoperate$ cd teleop/televuer
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ pip install -e .
-# Generate the certificate files required for televuer submodule
-(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem
+
 # Install dex-retargeting submodule
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ cd ../robot_control/dex-retargeting/
 (tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ pip install -e .
-# Install additional dependencies required by this repo
+# Install this repo (the `teleop` package) and its remaining dependencies
 (tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ cd ../../../
-(tv) unitree@Host:~/xr_teleoperate$ pip install -r requirements.txt
+(tv) unitree@Host:~/xr_teleoperate$ pip install -e .
 ```
 
-## 1.2 🕹️ unitree_sdk2_python
+## 1.2 🔐 SSL 証明書の設定（televuer）
+> SSL 証明書の設定は XR デバイスの接続に必要です。pixi を使用した場合も手動 conda の場合も同様です。
+
+XR デバイスは HTTPS / WebRTC でホストに接続するため、TLS 証明書が必要です。
+`teleop/televuer/` ディレクトリで以下のコマンドを実行してください（pixi を使用した場合は `pixi shell` の中で実行）。
+
+```bash
+# Pico / Quest XR デバイスの場合
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem
+```
+
+```bash
+# Apple Vision Pro の場合
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl genrsa -out rootCA.key 2048
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl req -x509 -new -nodes -key rootCA.key -sha256 -days 365 -out rootCA.pem -subj "/CN=xr-teleoperate"
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl genrsa -out key.pem 2048
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl req -new -key key.pem -out server.csr -subj "/CN=localhost"
+# server_ext.cnf を作成（IP.2 はホストの IP アドレスに合わせてください — ifconfig で確認）
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ vim server_ext.cnf
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = localhost
+IP.1 = 192.168.123.164
+IP.2 = 192.168.123.2
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl x509 -req -in server.csr -CA rootCA.pem -CAkey rootCA.key -CAcreateserial -out cert.pem -days 365 -sha256 -extfile server_ext.cnf
+# rootCA.pem を AirDrop で Apple Vision Pro に転送してインストール
+
+# ファイアウォールの有効化
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ sudo ufw allow 8012
+
+# 証明書パスの設定 — どちらか一方を選択
+# 2.1 ユーザー設定ディレクトリ（任意）
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ mkdir -p ~/.config/xr_teleoperate/
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ cp cert.pem key.pem ~/.config/xr_teleoperate/
+# 2.2 環境変数（任意）
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ echo 'export XR_TELEOP_CERT="$HOME/xr_teleoperate/teleop/televuer/cert.pem"' >> ~/.bashrc
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ echo 'export XR_TELEOP_KEY="$HOME/xr_teleoperate/teleop/televuer/key.pem"' >> ~/.bashrc
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ source ~/.bashrc
+```
+
+## 1.3 🕹️ unitree_sdk2_python
 
 ```bash
 # ロボット通信用ライブラリインストール

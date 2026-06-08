@@ -118,7 +118,37 @@ We tested our code on Ubuntu 20.04 and Ubuntu 22.04, other operating systems may
 
 For more information, you can refer to [Official Documentation ](https://support.unitree.com/home/zh/Teleoperation) and [OpenTeleVision](https://github.com/OpenTeleVision/TeleVision).
 
-## 1.1 📥 basic
+## 1.0 ⚡ Quick install with [pixi](https://pixi.sh) (recommended)
+
+The repo ships a `pixi.toml` + `pyproject.toml`, so [pixi](https://pixi.sh) can
+set up the entire environment with a single command. It resolves the conda-forge
+C++ libraries (`pinocchio`, `casadi`, `numpy`, `cyclonedds`) and the editable
+submodules (`teleimager`, `televuer`, `dex-retargeting`). Supported on `linux-64`
+and `linux-aarch64` (e.g. the Jetson in the robot).
+
+```bash
+# Install pixi once (see https://pixi.sh): curl -fsSL https://pixi.sh/install.sh | bash
+git clone https://github.com/unitreerobotics/xr_teleoperate.git
+cd xr_teleoperate
+git submodule update --init --depth 1        # the path dependencies below need the submodule trees
+pixi install                                 # creates the env: conda libs + editable submodules
+pixi shell                                   # drop into the environment, then run teleop as usual
+```
+
+> **`unitree_sdk2py` (robot communication).** On `linux-64`, pixi fetches and
+> installs it from git automatically. It pins `cyclonedds==0.10.2`, which has no
+> `linux-aarch64` wheel, so on the **Jetson (aarch64)** it must be built
+> on-device against the `cyclonedds` C library that pixi already provides:
+> ```bash
+> # inside `pixi shell` on the Jetson:
+> export CYCLONEDDS_HOME="$CONDA_PREFIX"
+> pip install --no-build-isolation "git+https://github.com/unitreerobotics/unitree_sdk2_python.git"
+> ```
+>
+> If you prefer a manual conda setup instead of pixi, follow sections 1.1, 1.2 and 1.3
+> below (which also covers installing `unitree_sdk2_python` by hand).
+
+## 1.1 📥 Conda environment
 
 ```bash
 # Create a conda environment
@@ -142,11 +172,27 @@ For more information, you can refer to [Official Documentation ](https://support
 (tv) unitree@Host:~/xr_teleoperate$ cd teleop/televuer
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ pip install -e .
 
-# Configure SSL certificates for the televuer module so that XR devices (e.g., Pico / Quest / Apple Vision Pro) can securely connect via HTTPS / WebRTC
-# 1. Generate certificate files
-# 1.1 For Pico / Quest XR devices
+# Install dex-retargeting submodule
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ cd ../robot_control/dex-retargeting/
+(tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ pip install -e .
+# Install this repo (the `teleop` package) and its remaining dependencies
+(tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ cd ../../../
+(tv) unitree@Host:~/xr_teleoperate$ pip install -e .
+```
+
+## 1.2 🔐 SSL certificates (televuer)
+> SSL certificate setup is required to allow XR devices to connect. This applies regardless of whether you used pixi or the manual conda install.
+
+XR devices connect to the host over HTTPS / WebRTC and require a TLS certificate.
+Run these commands from `teleop/televuer/` (or from inside `pixi shell` if you used pixi).
+
+```bash
+# For Pico / Quest XR devices
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem
-# 1.2 For Apple Vision Pro
+```
+
+```bash
+# For Apple Vision Pro
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl genrsa -out rootCA.key 2048
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl req -x509 -new -nodes -key rootCA.key -sha256 -days 365 -out rootCA.pem -subj "/CN=xr-teleoperate"
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl genrsa -out key.pem 2048
@@ -176,9 +222,7 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ source ~/.bashrc
 ```
 
-
-
-## 1.2 🕹️ unitree_sdk2_python
+## 1.3 🕹️ unitree_sdk2_python
 
 ```bash
 # Install unitree_sdk2_python library which handles communication with the robot

@@ -1,0 +1,45 @@
+[workspace]
+name = "xr-teleoperate"
+channels = ["conda-forge"]
+# linux-aarch64 included so it runs on the Jetson in the Unitree robots. All
+# heavy deps have aarch64 builds: conda-forge pinocchio 3.1 / casadi 3.6, and
+# PyPI aarch64 wheels for torch 2.3.0, opencv, av, rerun-sdk<0.24, etc.
+platforms = ["linux-64", "linux-aarch64"]
+
+# rerun-sdk (and some other wheels) ship as manylinux_2_31; declare a glibc 2.31
+# floor so pixi accepts them. Safe on both targets: Ubuntu 20.04+ and JetPack
+# 5/6 (Jetson) ship glibc >= 2.31.
+[system-requirements]
+libc = { family = "glibc", version = "2.31" }
+
+# Conda-forge C++/ABI libs (the reason a pure-pip install is insufficient).
+# python 3.10 matches the upstream README's tested env and has a prebuilt
+# cyclonedds==0.10.2 wheel on x86 (cyclonedds ships no cp311 / no aarch64 wheels).
+[dependencies]
+python = "3.10.*"
+numpy = "1.26.*"
+pinocchio = "3.1.*"
+casadi = "3.6.*"
+# cyclonedds C library — needed to build the cyclonedds python binding from
+# source where no wheel exists (e.g. linux-aarch64 / the Jetson).
+cyclonedds = "0.10.*"
+pip = "*"
+
+[pypi-dependencies]
+# This repo, editable; its pyproject deps resolve against the entries below.
+xr-teleoperate = { path = ".", editable = true }
+# The repo's own submodules as editable packages (run `git submodule update
+# --init` first). These paths are internal to the repo — no external layout.
+televuer = { path = "teleop/televuer", editable = true }
+teleimager = { path = "teleop/teleimager", editable = true }
+dex-retargeting = { path = "teleop/robot_control/dex-retargeting", editable = true }
+# vuer 0.0.60 (a televuer dep) uses Flag, which was removed in params-proto 3.x.
+params-proto = ">=2.13.0,<3.0"
+
+# Robot-comms lib: not a submodule, not on PyPI — fetched from upstream git.
+# Scoped to linux-64 because it pins cyclonedds==0.10.2, which ships no aarch64
+# wheel and therefore must be compiled on-device on the Jetson (against the
+# conda cyclonedds C lib above) — it cannot be cross-resolved from an x86 host.
+# See README for the aarch64/Jetson install step.
+[target.linux-64.pypi-dependencies]
+unitree_sdk2py = { git = "https://github.com/unitreerobotics/unitree_sdk2_python.git" }
