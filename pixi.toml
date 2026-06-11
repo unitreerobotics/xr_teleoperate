@@ -31,7 +31,6 @@ pip = "*"
 xr-teleoperate = { path = ".", editable = true }
 # The repo's own submodules as editable packages (run `git submodule update
 # --init` first). These paths are internal to the repo — no external layout.
-unitree_sdk2py = { path = "teleop/unitree_sdk2_python", editable = true }
 televuer = { path = "teleop/televuer", editable = true }
 teleimager = { path = "teleop/teleimager", editable = true, extras = ["server"] }
 dex-retargeting = { path = "teleop/robot_control/dex-retargeting", editable = true }
@@ -44,3 +43,4 @@ params-proto = ">=2.13.0,<3.0"
 # conda cyclonedds C lib above) — it cannot be cross-resolved from an x86 host.
 # See README for the aarch64/Jetson install step.
 [target.linux-64.pypi-dependencies]
+unitree_sdk2py = { path = "teleop/unitree_sdk2_python", editable = true }
