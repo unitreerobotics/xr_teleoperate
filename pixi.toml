@@ -23,6 +23,7 @@ casadi = "3.6.*"
 # cyclonedds C library — needed to build the cyclonedds python binding from
 # source where no wheel exists (e.g. linux-aarch64 / the Jetson).
 cyclonedds = "0.10.*"
+pyrealsense2 = "*"
 pip = "*"
 
 [pypi-dependencies]
@@ -30,16 +31,16 @@ pip = "*"
 xr-teleoperate = { path = ".", editable = true }
 # The repo's own submodules as editable packages (run `git submodule update
 # --init` first). These paths are internal to the repo — no external layout.
+unitree_sdk2py = { path = "teleop/unitree_sdk2_python", editable = true }
 televuer = { path = "teleop/televuer", editable = true }
-teleimager = { path = "teleop/teleimager", editable = true }
+teleimager = { path = "teleop/teleimager", editable = true, extras = ["server"] }
 dex-retargeting = { path = "teleop/robot_control/dex-retargeting", editable = true }
 # vuer 0.0.60 (a televuer dep) uses Flag, which was removed in params-proto 3.x.
 params-proto = ">=2.13.0,<3.0"
 
-# Robot-comms lib: not a submodule, not on PyPI — fetched from upstream git.
+# Robot-comms lib: submodule at teleop/unitree_sdk2_python, not on PyPI.
 # Scoped to linux-64 because it pins cyclonedds==0.10.2, which ships no aarch64
 # wheel and therefore must be compiled on-device on the Jetson (against the
 # conda cyclonedds C lib above) — it cannot be cross-resolved from an x86 host.
 # See README for the aarch64/Jetson install step.
 [target.linux-64.pypi-dependencies]
-unitree_sdk2py = { git = "https://github.com/unitreerobotics/unitree_sdk2_python.git" }

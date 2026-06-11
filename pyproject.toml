@@ -21,8 +21,7 @@ license = { text = "Apache-2.0" }
 # Intentionally NOT declared here (env-provided + documented in README):
 #   - pinocchio, casadi : conda-forge only for this ABI stack; supplied by the
 #                         surrounding pixi/conda manifest's [dependencies].
-#   - unitree_sdk2py    : not a submodule, not on PyPI; supplied from git by
-#                         pixi.toml (and by manual git install for non-pixi use).
+#   - unitree_sdk2py    : submodule at teleop/unitree_sdk2_python.
 dependencies = [
     "numpy<2",
     "opencv-python",
