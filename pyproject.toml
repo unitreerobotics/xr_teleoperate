@@ -14,10 +14,6 @@ license = { text = "Apache-2.0" }
 # own submodule packages (televuer/teleimager/dex-retargeting), which both the
 # standalone pixi env and the HIVE monorepo supply as editable path deps.
 #
-# rerun-sdk<0.23.2 stays numpy<2-compatible (0.23.2+ require numpy>=2, which would
-# conflict with pinocchio); its wheels are manylinux_2_31, so pixi.toml declares a
-# glibc 2.31 system requirement to accept them on both linux-64 and linux-aarch64.
-#
 # Intentionally NOT declared here (env-provided + documented in README):
 #   - pinocchio, casadi : conda-forge only for this ABI stack; supplied by the
 #                         surrounding pixi/conda manifest's [dependencies].
@@ -31,13 +27,21 @@ dependencies = [
     "matplotlib>=3.7",
     "meshcat>=0.3",
     "sshkeyboard>=2.3",
-    "rerun-sdk>=0.20,<0.23.2",
     "psutil",
     # This repo's own submodule packages — version-less names satisfied by the
     # surrounding pixi manifest's path entries (nested here; sibling in monorepo).
     "televuer",
     "teleimager",
     "dex-retargeting",
+]
+
+[project.optional-dependencies]
+# rerun-sdk<0.23.2 stays numpy<2-compatible (0.23.2+ require numpy>=2, which
+# conflicts with pinocchio); its wheels are manylinux_2_31+, so environments on
+# older glibc (e.g. manylinux_2_28) must omit this extra. Install with:
+#   pip install xr-teleoperate[visualization]
+visualization = [
+    "rerun-sdk>=0.20,<0.23.2",
 ]
 
 [tool.setuptools.packages.find]
