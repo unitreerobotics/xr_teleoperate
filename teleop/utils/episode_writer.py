@@ -4,7 +4,11 @@ import json
 import datetime
 import numpy as np
 import time
-from .rerun_visualizer import RerunLogger
+try:
+    from .rerun_visualizer import RerunLogger
+    _RERUN_AVAILABLE = True
+except ImportError:
+    _RERUN_AVAILABLE = False
 from queue import Queue, Empty
 from threading import Thread
 import logging_mp
@@ -32,7 +36,9 @@ class EpisodeWriter():
         self.frequency = frequency
         self.image_size = image_size
 
-        self.rerun_log = rerun_log
+        self.rerun_log = rerun_log and _RERUN_AVAILABLE
+        if rerun_log and not _RERUN_AVAILABLE:
+            logger_mp.warning("rerun-sdk not installed — live visualization disabled.")
         if self.rerun_log:
             logger_mp.info("==> RerunLogger initializing...\n")
             self.rerun_logger = RerunLogger(prefix="online/", IdxRangeBoundary = 60, memory_limit = "300MB")
