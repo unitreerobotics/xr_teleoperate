@@ -6,16 +6,16 @@ import time
 from pinocchio import casadi as cpin
 from pinocchio.visualize import MeshcatVisualizer
 import os
-import sys
 import pickle
 from pathlib import Path
 import logging_mp
 logger_mp = logging_mp.getLogger(__name__)
-parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(parent2_dir)
 
 # Default asset root — resolved from this file so CWD doesn't matter.
 ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+
+# Pinocchio model cache — per-user, not CWD-relative.
+_CACHE_DIR = Path.home() / ".cache" / "xr_teleoperate"
 
 from teleop.utils.weighted_moving_filter import WeightedMovingFilter
 
@@ -26,8 +26,8 @@ class G1_29_ArmIK:
         self.Unit_Test = Unit_Test  # retained for API compatibility; no longer affects paths
         self.Visualization = Visualization
 
-        # fixed cache file path
-        self.cache_path = "g1_29_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "g1_29_model_cache.pkl"
 
         _default = ASSETS_DIR / "g1"
         self.urdf_path = str(urdf_path) if urdf_path else str(_default / "g1_body29_hand14.urdf")
@@ -318,7 +318,8 @@ class G1_23_ArmIK:
         self.Visualization = Visualization
 
         # fixed cache file path
-        self.cache_path = "g1_23_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "g1_23_model_cache.pkl"
 
         _default = ASSETS_DIR / "g1"
         self.urdf_path = str(urdf_path) if urdf_path else str(_default / "g1_body23.urdf")
@@ -595,7 +596,8 @@ class H1_2_ArmIK:
         self.Visualization = Visualization
 
         # fixed cache file path
-        self.cache_path = "h1_2_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "h1_2_model_cache.pkl"
 
         _default = ASSETS_DIR / "h1_2"
         self.urdf_path = str(urdf_path) if urdf_path else str(_default / "h1_2.urdf")
@@ -895,7 +897,8 @@ class H1_ArmIK:
         self.Visualization = Visualization
 
         # fixed cache file path
-        self.cache_path = "h1_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "h1_model_cache.pkl"
 
         _default = ASSETS_DIR / "h1"
         self.urdf_path = str(urdf_path) if urdf_path else str(_default / "h1_with_hand.urdf")
@@ -1199,7 +1202,8 @@ class H2_ArmIK:
         self.Visualization = Visualization
 
         # fixed cache file path
-        self.cache_path = "h2_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "h2_model_cache.pkl"
 
         _default = ASSETS_DIR / "h2"
         self.urdf_path = str(urdf_path) if urdf_path else str(_default / "H2.urdf")

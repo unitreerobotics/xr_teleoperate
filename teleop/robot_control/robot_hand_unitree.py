@@ -10,13 +10,9 @@ from unitree_sdk2py.idl.default import unitree_go_msg_dds__MotorCmd_
 import numpy as np
 from enum import IntEnum
 import time
-import os
-import sys
 import threading
 from multiprocessing import Process, Array, Value, Lock
 
-parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(parent2_dir)
 from teleop.robot_control.hand_retargeting import HandRetargeting, HandType
 from teleop.utils.weighted_moving_filter import WeightedMovingFilter
 
