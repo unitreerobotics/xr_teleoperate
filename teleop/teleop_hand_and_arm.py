@@ -164,8 +164,17 @@ if __name__ == '__main__':
 
         # end-effector
         xr_motion_data_ready = Value('b', False, lock=True)        # [input] whether XR hand/controller motion data has arrived
-        if args.ee in ("dex3", "inspire_ftp", "inspire_dfx") and args.input_mode == "controller":
+        if args.ee in ("dex3", "inspire_ftp") and args.input_mode == "controller":
             raise ValueError(f"{args.ee} does not support controller input mode.")
+        elif args.ee == "inspire_dfx" and args.input_mode == "controller":
+            # walk + grasp: inspire fingers driven by the controllers, legs by the thumbsticks.
+            # Right-stick press -> finger mode (legs stop); left-stick press -> walk mode.
+            from teleop.robot_control.robot_hand_inspire import Inspire_Controller_Ctrl
+            left_ctrl_input  = Array('d', 6, lock=True)   # [stick_x, stick_y, trigger, squeeze, toward_btn, away_btn]
+            right_ctrl_input = Array('d', 6, lock=True)
+            left_ctrl_input[:]  = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]   # neutral (no finger motion)
+            right_ctrl_input[:] = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]
+            hand_ctrl = Inspire_Controller_Ctrl(left_ctrl_input, right_ctrl_input, simulation_mode=args.sim)
         elif args.ee == "dex3":
             from teleop.robot_control.robot_hand_unitree import Dex3_1_Controller
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
@@ -184,7 +193,7 @@ if __name__ == '__main__':
             dual_gripper_action_array = Array('d', 2, lock=False)  # current left, right gripper action(2) data.
             gripper_ctrl = Dex1_1_Gripper_Controller(left_gripper_value, right_gripper_value, dual_gripper_data_lock, 
                                                      dual_gripper_state_array, dual_gripper_action_array, simulation_mode=args.sim, xr_motion_data_ready_in=xr_motion_data_ready)
-        elif args.ee == "inspire_dfx":
+        elif args.ee == "inspire_dfx" and args.input_mode == "hand":
             from teleop.robot_control.robot_hand_inspire import Inspire_Controller_DFX
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
             right_hand_pos_array = Array('d', 75, lock = True)     # [input]
@@ -281,6 +290,12 @@ if __name__ == '__main__':
         left_wrist_img = None
         right_wrist_img = None
 
+        # controller-mode walk/finger state: right-stick press -> finger mode (legs stop),
+        # left-stick press -> walk mode (legs move, no fingers). Edge-detected via prev_*_press.
+        finger_mode = False
+        prev_l_press = False
+        prev_r_press = False
+
         # main loop. robot start to follow VR user's motion
         while not STOP:
             start_time = time.time()
@@ -344,18 +359,49 @@ if __name__ == '__main__':
             
             # high level control
             if args.input_mode == "controller" and args.motion:
-                # quit teleoperate
-                if tele_data.right_ctrl_aButton:
-                    START = False
-                    STOP = True
+                l_press = tele_data.left_ctrl_thumbstick
+                r_press = tele_data.right_ctrl_thumbstick
                 # command robot to enter damping mode. soft emergency stop function
-                if tele_data.left_ctrl_thumbstick and tele_data.right_ctrl_thumbstick:
-                    loco_wrapper.Enter_Damp_Mode()   # fix PR#310: wrapper has Enter_Damp_Mode(), not Damp()
+                if l_press and r_press:
+                    loco_wrapper.Enter_Damp_Mode()   # both sticks pressed = soft e-stop
                 else:
-                    # https://github.com/unitreerobotics/xr_teleoperate/issues/135, control, limit velocity to within 0.3
-                    loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
-                                      -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
-                                      -tele_data.right_ctrl_thumbstickValue[0]* 0.3)
+                    # mode toggle (rising edges): right stick -> finger mode, left stick -> walk mode
+                    if r_press and not prev_r_press:
+                        finger_mode = True
+                    if l_press and not prev_l_press:
+                        finger_mode = False
+                    if finger_mode:
+                        loco_wrapper.Move(0.0, 0.0, 0.0)   # legs stop while controlling fingers
+                    else:
+                        # quit teleoperate (A) — only in walk mode; A drives the right thumb in finger mode
+                        if tele_data.right_ctrl_aButton:
+                            START = False
+                            STOP = True
+                        # https://github.com/unitreerobotics/xr_teleoperate/issues/135, limit velocity to within 0.3
+                        loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
+                                          -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
+                                          -tele_data.right_ctrl_thumbstickValue[0]* 0.3)
+                prev_l_press = l_press
+                prev_r_press = r_press
+
+                # feed the inspire finger controller (Y/B = thumb toward palm, X/A = thumb away)
+                if args.ee == "inspire_dfx":
+                    if finger_mode:
+                        left_ctrl_input[:] = [float(tele_data.left_ctrl_thumbstickValue[0]),
+                                              float(tele_data.left_ctrl_thumbstickValue[1]),
+                                              float(tele_data.left_ctrl_triggerValue),
+                                              float(tele_data.left_ctrl_squeezeValue),
+                                              1.0 if tele_data.left_ctrl_bButton else 0.0,   # Y -> left thumb toward
+                                              1.0 if tele_data.left_ctrl_aButton else 0.0]   # X -> left thumb away
+                        right_ctrl_input[:] = [float(tele_data.right_ctrl_thumbstickValue[0]),
+                                               float(tele_data.right_ctrl_thumbstickValue[1]),
+                                               float(tele_data.right_ctrl_triggerValue),
+                                               float(tele_data.right_ctrl_squeezeValue),
+                                               1.0 if tele_data.right_ctrl_bButton else 0.0,  # B -> right thumb toward
+                                               1.0 if tele_data.right_ctrl_aButton else 0.0]  # A -> right thumb away
+                    else:
+                        left_ctrl_input[:]  = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]   # neutral: no finger motion
+                        right_ctrl_input[:] = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]
 
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
