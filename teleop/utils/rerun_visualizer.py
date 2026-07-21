@@ -2,10 +2,16 @@ import os
 import json
 import cv2
 import time
-import rerun as rr
-import rerun.blueprint as rrb
+try:
+    import rerun as rr
+    import rerun.blueprint as rrb
+    os.environ["RUST_LOG"] = "error"
+    _RERUN_AVAILABLE = True
+except ImportError:
+    rr = None
+    rrb = None
+    _RERUN_AVAILABLE = False
 from datetime import datetime
-os.environ["RUST_LOG"] = "error"
 
 class RerunEpisodeReader:
     def __init__(self, task_dir = ".", json_file="data.json"):
@@ -72,6 +78,8 @@ class RerunEpisodeReader:
 
 class RerunLogger:
     def __init__(self, prefix = "", IdxRangeBoundary = 30, memory_limit = None):
+        if not _RERUN_AVAILABLE:
+            raise ImportError("rerun-sdk is not installed. Install with: pip install 'rerun-sdk>=0.20,<0.23.2'")
         self.prefix = prefix
         self.IdxRangeBoundary = IdxRangeBoundary
         rr.init(datetime.now().strftime("Runtime_%Y%m%d_%H%M%S"))

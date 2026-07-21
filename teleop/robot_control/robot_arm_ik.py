@@ -1,36 +1,37 @@
-import casadi                                                                       
+import casadi
 import meshcat.geometry as mg
 import numpy as np
-import pinocchio as pin                             
+import pinocchio as pin
 import time
-from pinocchio import casadi as cpin    
-from pinocchio.visualize import MeshcatVisualizer   
+from pinocchio import casadi as cpin
+from pinocchio.visualize import MeshcatVisualizer
 import os
-import sys
 import pickle
+from pathlib import Path
 import logging_mp
 logger_mp = logging_mp.getLogger(__name__)
-parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(parent2_dir)
+
+# Default asset root — resolved from this file so CWD doesn't matter.
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
+
+# Pinocchio model cache — per-user, not CWD-relative.
+_CACHE_DIR = Path.home() / ".cache" / "xr_teleoperate"
 
 from teleop.utils.weighted_moving_filter import WeightedMovingFilter
 
 class G1_29_ArmIK:
-    def __init__(self, Unit_Test = False, Visualization = False):
+    def __init__(self, urdf_path=None, model_dir=None, Unit_Test=False, Visualization=False):
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
-        self.Unit_Test = Unit_Test
+        self.Unit_Test = Unit_Test  # retained for API compatibility; no longer affects paths
         self.Visualization = Visualization
 
-        # fixed cache file path
-        self.cache_path = "g1_29_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "g1_29_model_cache.pkl"
 
-        if not self.Unit_Test:
-            self.urdf_path = '../assets/g1/g1_body29_hand14.urdf'
-            self.model_dir = '../assets/g1/'
-        else:
-            self.urdf_path = '../../assets/g1/g1_body29_hand14.urdf'
-            self.model_dir = '../../assets/g1/'
+        _default = ASSETS_DIR / "g1"
+        self.urdf_path = str(urdf_path) if urdf_path else str(_default / "g1_body29_hand14.urdf")
+        self.model_dir = str(model_dir) if model_dir else str(_default)
 
         # Try loading cache first
         if os.path.exists(self.cache_path) and (not self.Visualization):
@@ -310,21 +311,19 @@ class G1_29_ArmIK:
             return current_lr_arm_motor_q, np.zeros(self.reduced_robot.model.nv)
         
 class G1_23_ArmIK:
-    def __init__(self, Unit_Test = False, Visualization = False):
+    def __init__(self, urdf_path=None, model_dir=None, Unit_Test=False, Visualization=False):
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
-        self.Unit_Test = Unit_Test
+        self.Unit_Test = Unit_Test  # retained for API compatibility; no longer affects paths
         self.Visualization = Visualization
 
         # fixed cache file path
-        self.cache_path = "g1_23_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "g1_23_model_cache.pkl"
 
-        if not self.Unit_Test:
-            self.urdf_path = '../assets/g1/g1_body23.urdf'
-            self.model_dir = '../assets/g1/'
-        else:
-            self.urdf_path = '../../assets/g1/g1_body23.urdf'
-            self.model_dir = '../../assets/g1/'
+        _default = ASSETS_DIR / "g1"
+        self.urdf_path = str(urdf_path) if urdf_path else str(_default / "g1_body23.urdf")
+        self.model_dir = str(model_dir) if model_dir else str(_default)
 
         # Try loading cache first
         if os.path.exists(self.cache_path) and (not self.Visualization):
@@ -590,21 +589,19 @@ class G1_23_ArmIK:
 
 
 class H1_2_ArmIK:
-    def __init__(self, Unit_Test = False, Visualization = False):
+    def __init__(self, urdf_path=None, model_dir=None, Unit_Test=False, Visualization=False):
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
-        self.Unit_Test = Unit_Test
+        self.Unit_Test = Unit_Test  # retained for API compatibility; no longer affects paths
         self.Visualization = Visualization
 
         # fixed cache file path
-        self.cache_path = "h1_2_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "h1_2_model_cache.pkl"
 
-        if not self.Unit_Test:
-            self.urdf_path = '../assets/h1_2/h1_2.urdf'
-            self.model_dir = '../assets/h1_2/'
-        else:
-            self.urdf_path = '../../assets/h1_2/h1_2.urdf'
-            self.model_dir = '../../assets/h1_2/'
+        _default = ASSETS_DIR / "h1_2"
+        self.urdf_path = str(urdf_path) if urdf_path else str(_default / "h1_2.urdf")
+        self.model_dir = str(model_dir) if model_dir else str(_default)
 
         # Try loading cache first
         if os.path.exists(self.cache_path) and (not self.Visualization):
@@ -893,21 +890,19 @@ class H1_2_ArmIK:
             return current_lr_arm_motor_q, np.zeros(self.reduced_robot.model.nv)
 
 class H1_ArmIK:
-    def __init__(self, Unit_Test = False, Visualization = False):
+    def __init__(self, urdf_path=None, model_dir=None, Unit_Test=False, Visualization=False):
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
-        self.Unit_Test = Unit_Test
+        self.Unit_Test = Unit_Test  # retained for API compatibility; no longer affects paths
         self.Visualization = Visualization
 
         # fixed cache file path
-        self.cache_path = "h1_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "h1_model_cache.pkl"
 
-        if not self.Unit_Test:
-            self.urdf_path = '../assets/h1/h1_with_hand.urdf'
-            self.model_dir = '../assets/h1/'
-        else:
-            self.urdf_path = '../../assets/h1/h1_with_hand.urdf'
-            self.model_dir = '../../assets/h1/'
+        _default = ASSETS_DIR / "h1"
+        self.urdf_path = str(urdf_path) if urdf_path else str(_default / "h1_with_hand.urdf")
+        self.model_dir = str(model_dir) if model_dir else str(_default)
 
         # Try loading cache first
         if os.path.exists(self.cache_path) and (not self.Visualization):
@@ -1200,21 +1195,19 @@ class H1_ArmIK:
             return current_lr_arm_motor_q, np.zeros(self.reduced_robot.model.nv)
         
 class H2_ArmIK:
-    def __init__(self, Unit_Test=False, Visualization=False):
+    def __init__(self, urdf_path=None, model_dir=None, Unit_Test=False, Visualization=False):
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
-        self.Unit_Test = Unit_Test
+        self.Unit_Test = Unit_Test  # retained for API compatibility; no longer affects paths
         self.Visualization = Visualization
 
         # fixed cache file path
-        self.cache_path = "h2_model_cache.pkl"
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_path = _CACHE_DIR / "h2_model_cache.pkl"
 
-        if not self.Unit_Test:
-            self.urdf_path = "../assets/h2/H2.urdf"
-            self.model_dir = "../assets/h2/"
-        else:
-            self.urdf_path = "../../assets/h2/H2.urdf"
-            self.model_dir = "../../assets/h2/"
+        _default = ASSETS_DIR / "h2"
+        self.urdf_path = str(urdf_path) if urdf_path else str(_default / "H2.urdf")
+        self.model_dir = str(model_dir) if model_dir else str(_default)
 
         # Try loading cache first
         if os.path.exists(self.cache_path) and (not self.Visualization):

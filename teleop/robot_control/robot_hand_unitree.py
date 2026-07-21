@@ -10,13 +10,9 @@ from unitree_sdk2py.idl.default import unitree_go_msg_dds__MotorCmd_
 import numpy as np
 from enum import IntEnum
 import time
-import os
-import sys
 import threading
 from multiprocessing import Process, Array, Value, Lock
 
-parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(parent2_dir)
 from teleop.robot_control.hand_retargeting import HandRetargeting, HandType
 from teleop.utils.weighted_moving_filter import WeightedMovingFilter
 
@@ -58,10 +54,7 @@ class Dex3_1_Controller:
         self.fps = fps
         self.Unit_Test = Unit_Test
         self.simulation_mode = simulation_mode
-        if not self.Unit_Test:
-            self.hand_retargeting = HandRetargeting(HandType.UNITREE_DEX3)
-        else:
-            self.hand_retargeting = HandRetargeting(HandType.UNITREE_DEX3_Unit_Test)
+        self.hand_retargeting = HandRetargeting(HandType.UNITREE_DEX3)
 
         # initialize handcmd publisher and handstate subscriber
         self.LeftHandCmb_publisher = ChannelPublisher(kTopicDex3LeftCommand, HandCmd_)

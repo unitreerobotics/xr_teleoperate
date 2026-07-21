@@ -119,6 +119,28 @@
 
 有关更多信息，您可以参考 [官方文档](https://support.unitree.com/home/zh/Teleoperation) 和 [OpenTeleVision](https://github.com/OpenTeleVision/TeleVision)。
 
+## 1.0 ⚡ 使用 [pixi](https://pixi.sh) 快速安装（推荐）
+
+本仓库提供了 `pixi.toml` 和 `pyproject.toml`，因此使用 [pixi](https://pixi.sh) 只需一条命令即可完成整个环境的配置。它会自动解析 conda-forge 的 C++ 库（`pinocchio`、`casadi`、`numpy`、`cyclonedds`）以及可编辑的子模块（`teleimager`、`televuer`、`dex-retargeting`）。支持 `linux-64` 和 `linux-aarch64`（例如机器人内的 Jetson）。
+
+```bash
+# 安装 pixi（参见 https://pixi.sh）: curl -fsSL https://pixi.sh/install.sh | bash
+git clone https://github.com/unitreerobotics/xr_teleoperate.git
+cd xr_teleoperate
+git submodule update --init --depth 1        # 路径依赖需要子模块目录树
+pixi install                                 # 创建环境：conda 库 + 可编辑子模块
+pixi shell                                   # 进入环境后，按常规方式运行 teleop
+```
+
+> **`unitree_sdk2py`（机器人通信库）。** 在 `linux-64` 上，pixi 会自动从 git 获取并安装。由于其固定依赖 `cyclonedds==0.10.2` 没有 `linux-aarch64` 的预编译包，在 **Jetson（aarch64）** 上需要在设备上针对 pixi 已提供的 `cyclonedds` C 库进行本地编译：
+> ```bash
+> # 在 Jetson 的 `pixi shell` 中执行：
+> export CYCLONEDDS_HOME="$CONDA_PREFIX"
+> pip install --no-build-isolation "git+https://github.com/unitreerobotics/unitree_sdk2_python.git"
+> ```
+>
+> 如需使用手动 conda 安装方式，请参照下方 1.1、1.2 和 1.3 节（含 `unitree_sdk2_python` 手动安装步骤）。
+
 ## 1.1 📥 基础环境
 
 ```bash
@@ -142,16 +164,33 @@
 # 安装 televuer 模块
 (tv) unitree@Host:~/xr_teleoperate$ cd teleop/televuer
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ pip install -e .
-# 为 televuer 模块配置 SSL 证书，以便 XR 设备（如 Pico / Quest / Apple Vision Pro）通过 HTTPS / WebRTC 安全连接
-# 1. 生成证书文件
-# 1.1 如果您使用 pico / quest 等 xr 设备
+
+# 安装 dex-retargeting 模块
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ cd ../robot_control/dex-retargeting/
+(tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ pip install -e .
+# 安装本仓库（teleop 包）及其余依赖库
+(tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ cd ../../../
+(tv) unitree@Host:~/xr_teleoperate$ pip install -e .
+```
+
+## 1.2 🔐 SSL 证书配置（televuer）
+> SSL 证书配置是 XR 设备连接的必要步骤，无论使用 pixi 还是手动 conda 安装均需完成。
+
+XR 设备通过 HTTPS / WebRTC 连接到主机，需要 TLS 证书。
+在 `teleop/televuer/` 目录下执行以下命令（使用 pixi 的用户请在 `pixi shell` 中执行）。
+
+```bash
+# 如果您使用 Pico / Quest XR 设备
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem
-# 1.2 如果您使用 apple vision pro 设备
+```
+
+```bash
+# 如果您使用 Apple Vision Pro 设备
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl genrsa -out rootCA.key 2048
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl req -x509 -new -nodes -key rootCA.key -sha256 -days 365 -out rootCA.pem -subj "/CN=xr-teleoperate"
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl genrsa -out key.pem 2048
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl req -new -key key.pem -out server.csr -subj "/CN=localhost"
-  ## 创建 server_ext.cnf 文件，输入以下内容（IP.2 地址应与您的 主机 IP 地址匹配，假设此处地址为 192.168.123.2。可以使用 `ifconfig` 等类似命令查询）
+# 创建 server_ext.cnf 文件（IP.2 应与主机 IP 匹配，可用 ifconfig 查询）
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ vim server_ext.cnf
 subjectAltName = @alt_names
 [alt_names]
@@ -159,36 +198,22 @@ DNS.1 = localhost
 IP.1 = 192.168.123.164
 IP.2 = 192.168.123.2
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ openssl x509 -req -in server.csr -CA rootCA.pem -CAkey rootCA.key -CAcreateserial -out cert.pem -days 365 -sha256 -extfile server_ext.cnf
-(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ ls
-build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA.pem  rootCA.srl  server.csr  server_ext.cnf  src  test
 # 通过 AirDrop 将 rootCA.pem 复制到 Apple Vision Pro 并安装它
 
 # 开启防火墙
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ sudo ufw allow 8012
 
-# 2. 配置证书路径，以下方式任选其一
+# 配置证书路径 — 以下方式任选其一
 # 2.1 用户配置目录（可选）
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ mkdir -p ~/.config/xr_teleoperate/
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ cp cert.pem key.pem ~/.config/xr_teleoperate/
-# 2.2 环境变量配置（可选）
+# 2.2 环境变量（可选）
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ echo 'export XR_TELEOP_CERT="$HOME/xr_teleoperate/teleop/televuer/cert.pem"' >> ~/.bashrc
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ echo 'export XR_TELEOP_KEY="$HOME/xr_teleoperate/teleop/televuer/key.pem"' >> ~/.bashrc
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ source ~/.bashrc
 ```
 
-```bash
-# 安装 dex-retargeting 模块
-(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ cd ../robot_control/dex-retargeting/
-(tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ pip install -e .
-```
-
-```bash
-# 安装本仓库所需的其他依赖库
-(tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ cd ../../../
-(tv) unitree@Host:~/xr_teleoperate$ pip install -r requirements.txt
-```
-
-## 1.2 🕹️ unitree_sdk2_python
+## 1.3 🕹️ unitree_sdk2_python
 
 ```bash
 # 安装 unitree_sdk2_python 库，该库负责开发设备与机器人之间的通信控制功能

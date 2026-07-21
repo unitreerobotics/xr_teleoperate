@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xr-teleoperate"
+version = "0.1.0"
+description = "XR teleoperation framework for Unitree humanoids (importable package: teleop)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+# Declares only deps every target env can resolve: PyPI packages + this repo's
+# own submodule packages (televuer/teleimager/dex-retargeting), which both the
+# standalone pixi env and the HIVE monorepo supply as editable path deps.
+#
+# Intentionally NOT declared here (env-provided + documented in README):
+#   - pinocchio, casadi : conda-forge only for this ABI stack; supplied by the
+#                         surrounding pixi/conda manifest's [dependencies].
+#   - unitree_sdk2py    : submodule at teleop/unitree_sdk2_python.
+dependencies = [
+    "numpy<2",
+    "opencv-python",
+    "pyyaml",
+    "pyzmq",
+    "logging-mp",
+    "matplotlib>=3.7",
+    "meshcat>=0.3",
+    "sshkeyboard>=2.3",
+    "psutil",
+    # This repo's own submodule packages — version-less names satisfied by the
+    # surrounding pixi manifest's path entries (nested here; sibling in monorepo).
+    "televuer",
+    "teleimager",
+    "dex-retargeting",
+]
+
+[project.optional-dependencies]
+# rerun-sdk<0.23.2 stays numpy<2-compatible (0.23.2+ require numpy>=2, which
+# conflicts with pinocchio); its wheels are manylinux_2_31+, so environments on
+# older glibc (e.g. manylinux_2_28) must omit this extra. Install with:
+#   pip install xr-teleoperate[visualization]
+visualization = [
+    "rerun-sdk>=0.20,<0.23.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["teleop*"]
+# namespaces defaults to false: only dirs with an __init__.py become packages, so
+# the submodule mount points (teleop/televuer, teleop/teleimager,
+# teleop/robot_control/dex-retargeting) are skipped and never vendored.
