@@ -71,7 +71,7 @@ class NodDetector:
     def __init__(self, needed=None, window_s=None, enter_thresh=None, exit_frac=None,
                  baseline_tau_s=None, refractory_s=None, sign=None, row=None, col=None):
         self.needed = _i("NOD_COUNT", 2) if needed is None else needed
-        self.window_s = _f("NOD_WINDOW_S", 1.5) if window_s is None else window_s
+        self.window_s = _f("NOD_WINDOW_S", 3.0) if window_s is None else window_s
         self.enter_thresh = _f("NOD_ENTER", 0.12) if enter_thresh is None else enter_thresh
         self.exit_frac = _f("NOD_EXIT_FRAC", 0.5) if exit_frac is None else exit_frac
         self.baseline_tau_s = _f("NOD_BASELINE_TAU", 1.0) if baseline_tau_s is None else baseline_tau_s
