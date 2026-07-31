@@ -20,6 +20,7 @@ from teleimager.image_client import ImageClient
 from teleop.utils.episode_writer import EpisodeWriter
 from teleop.utils.ipc import IPC_Server
 from teleop.utils.motion_switcher import MotionSwitcher, LocoClientWrapper
+from teleop.utils.hand_walk import HandWalkController
 from sshkeyboard import listen_keyboard, stop_listening
 
 # for simulation
@@ -138,7 +139,9 @@ if __name__ == '__main__':
         
         # motion mode (G1: Regular mode R1+X, not Running mode R2+A)
         if args.motion:
-            if args.input_mode == "controller":
+            if args.input_mode in ("controller", "hand"):
+                # Hand mode also needs the loco client: the operator double-nods into WALK mode
+                # and steers with arm displacement (see the main loop + teleop.utils.hand_walk).
                 loco_wrapper = LocoClientWrapper()
         else:
             motion_switcher = MotionSwitcher()
@@ -296,6 +299,13 @@ if __name__ == '__main__':
         prev_l_press = False
         prev_r_press = False
 
+        # hand-mode walk state: a double head-nod toggles WALK <-> HAND-TRACK. In WALK the arms
+        # become the joystick (frozen at frozen_sol_q so they don't flail while steering).
+        hand_walk = HandWalkController() if (args.input_mode == "hand" and args.motion) else None
+        walk_mode = False
+        frozen_sol_q = None
+        frozen_sol_tauff = None
+
         # main loop. robot start to follow VR user's motion
         while not STOP:
             start_time = time.time()
@@ -403,6 +413,21 @@ if __name__ == '__main__':
                         left_ctrl_input[:]  = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]   # neutral: no finger motion
                         right_ctrl_input[:] = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]
 
+            # hand-mode high level control: double-nod toggles WALK <-> HAND-TRACK; in WALK,
+            # arm displacement drives the legs with the same axis mapping as the thumbsticks.
+            if args.input_mode == "hand" and args.motion:
+                if tele_data.motion_data_ready:
+                    hw = hand_walk.update(tv_wrapper.tvuer.head_pose,
+                                          tele_data.left_wrist_pose, tele_data.right_wrist_pose,
+                                          time.time())
+                    if hw["toggled"]:
+                        walk_mode = hw["walk_mode"]
+                        logger_mp.info(f"[hand-walk] nod -> {'WALK (arms steer)' if walk_mode else 'HAND-TRACK (manipulate)'} mode")
+                    loco_wrapper.Move(hw["vx"], hw["vy"], hw["vyaw"])
+                else:
+                    # No fresh XR tracking (e.g. headset removed/occluded): never keep walking.
+                    loco_wrapper.Move(0.0, 0.0, 0.0)
+
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
             current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
@@ -412,7 +437,14 @@ if __name__ == '__main__':
             sol_q, sol_tauff  = arm_ik.solve_ik(tele_data.left_wrist_pose, tele_data.right_wrist_pose, current_lr_arm_q, current_lr_arm_dq)
             time_ik_end = time.time()
             logger_mp.debug(f"ik:\t{round(time_ik_end - time_ik_start, 6)}")
-            arm_ctrl.ctrl_dual_arm(sol_q, sol_tauff)
+            if walk_mode and frozen_sol_q is not None:
+                # WALK mode: arms are the joystick -> hold them at the pose captured on entry
+                # instead of tracking, so steering motion doesn't make the robot arms flail.
+                arm_ctrl.ctrl_dual_arm(frozen_sol_q, frozen_sol_tauff)
+            else:
+                arm_ctrl.ctrl_dual_arm(sol_q, sol_tauff)
+                # keep the latest tracked pose as the freeze target for the next WALK toggle
+                frozen_sol_q, frozen_sol_tauff = sol_q, sol_tauff
 
             # record data
             if args.record:
