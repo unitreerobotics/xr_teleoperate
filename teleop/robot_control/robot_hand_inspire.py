@@ -377,7 +377,7 @@ class Inspire_Controller_Ctrl:
           forward=index close / back=index open;  right=middle close / left=middle open;
           NE=ring close / SW=ring open;            NW=pinky close / SE=pinky open.
     """
-    STEP = 0.02          # per-frame move (at fps) -> full range in ~0.5 s
+    STEP = 0.01          # per-frame move (at fps) -> full range in ~1.0 s (halved from 0.02)
     MAG_THRESH = 0.6     # thumbstick must be pushed this far to move a finger
     DOT_THRESH = 0.94    # ~within 20 deg of one of the 8 directions -> only one finger at a time
     TOWARD_SIGN = -1.0   # sign applied to idx5 for "toward palm" (flip to +1.0 if it goes the wrong way)
