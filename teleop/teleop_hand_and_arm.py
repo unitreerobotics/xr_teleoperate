@@ -77,7 +77,7 @@ if __name__ == '__main__':
     parser.add_argument('--input-mode', type=str, choices=['hand', 'controller'], default='hand', help='Select XR device input tracking source')
     parser.add_argument('--display-mode', type=str, choices=['immersive', 'ego', 'pass-through'], default='immersive', help='Select XR device display mode')
     parser.add_argument('--arm', type=str, choices=['G1_29', 'G1_23', 'H1_2', 'H1', 'H2', 'R1_A5', 'R1_A7'], default='G1_29', help='Select arm controller')
-    parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'inspire_ftp', 'inspire_dfx', 'brainco'], help='Select end effector controller')
+    parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'dex5', 'inspire_ftp', 'inspire_dfx', 'brainco'], help='Select end effector controller')
     # network parameters
     parser.add_argument('--img-server-ip', type=str, default='192.168.123.164', help='IP address of image server, used by teleimager and televuer')
     parser.add_argument('--network-interface', type=str, default=None, help='Network interface for dds communication, e.g., eth0, wlan0. If None, use default interface.')
@@ -173,8 +173,17 @@ if __name__ == '__main__':
 
         # end-effector
         xr_motion_data_ready = Value('b', False, lock=True)        # [input] whether XR hand/controller motion data has arrived
-        if args.ee in ("dex3", "inspire_ftp", "inspire_dfx") and args.input_mode == "controller":
+        if args.ee in ("dex3", "dex5", "inspire_ftp", "inspire_dfx") and args.input_mode == "controller":
             raise ValueError(f"{args.ee} does not support controller input mode.")
+        elif args.ee == "dex5":
+            from teleop.robot_control.robot_hand_unitree import Dex5_1_Controller
+            left_hand_pos_array = Array('d', 75, lock = True)      # [input]
+            right_hand_pos_array = Array('d', 75, lock = True)     # [input]
+            dual_hand_data_lock = Lock()
+            dual_hand_state_array = Array('d', 40, lock = False)   # [output] current left, right hand state(40) data.
+            dual_hand_action_array = Array('d', 40, lock = False)  # [output] current left, right hand action(40) data.
+            hand_ctrl = Dex5_1_Controller(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock,
+                                          dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim, xr_motion_data_ready_in=xr_motion_data_ready)
         elif args.ee == "dex3":
             from teleop.robot_control.robot_hand_unitree import Dex3_1_Controller
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
@@ -322,7 +331,7 @@ if __name__ == '__main__':
 
             # get xr's tele data
             tele_data = tv_wrapper.get_tele_data()
-            if args.ee in ("dex3", "inspire_ftp", "inspire_dfx", "brainco")  and args.input_mode == "hand":
+            if args.ee in ("dex3", "dex5", "inspire_ftp", "inspire_dfx", "brainco")  and args.input_mode == "hand":
                 with left_hand_pos_array.get_lock():
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
                 with right_hand_pos_array.get_lock():
@@ -380,7 +389,15 @@ if __name__ == '__main__':
             if args.record:
                 READY = recorder.is_ready() # now ready to (2) enter RECORD_RUNNING state
                 # dex hand or gripper
-                if args.ee == "dex3" and args.input_mode == "hand":
+                if args.ee == "dex5" and args.input_mode == "hand":
+                    with dual_hand_data_lock:
+                        left_ee_state = dual_hand_state_array[:20]
+                        right_ee_state = dual_hand_state_array[-20:]
+                        left_hand_action = dual_hand_action_array[:20]
+                        right_hand_action = dual_hand_action_array[-20:]
+                        current_body_state = []
+                        current_body_action = []
+                elif args.ee == "dex3" and args.input_mode == "hand":
                     with dual_hand_data_lock:
                         left_ee_state = dual_hand_state_array[:7]
                         right_ee_state = dual_hand_state_array[-7:]
