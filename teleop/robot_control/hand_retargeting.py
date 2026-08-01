@@ -1,13 +1,29 @@
 from dex_retargeting import RetargetingConfig
 from pathlib import Path
+import numpy as np
 import yaml
 from enum import Enum
 import logging_mp
 logger_mp = logging_mp.getLogger(__name__)
 
+# Dex5-1 fingers extend along +Y of the hand base frame (base_link00L/R). 
+# tv_wrapper delivers landmarks fingers-along--Y (Inspire/Dex3), so
+# without this rotation the retargeter reaches behind the palm and saturates every
+# proximal joint at pi/2 (a permanent fist). The sides need different matrices: the
+# URDFs mirror in z, the landmarks in x, so one shared rotation would flip the
+# spread axis on one hand.
+DEX5_LANDMARK_ROTATION_LEFT = np.array([[0,  0, 1],
+                                        [0, -1, 0],
+                                        [1,  0, 0]], dtype=float)
+DEX5_LANDMARK_ROTATION_RIGHT = np.array([[ 0,  0, -1],
+                                         [ 0, -1,  0],
+                                         [-1,  0,  0]], dtype=float)
+
 class HandType(Enum):
     INSPIRE_HAND = "../assets/inspire_hand/inspire_hand.yml"
     INSPIRE_HAND_Unit_Test = "../../assets/inspire_hand/inspire_hand.yml"
+    UNITREE_DEX5 = "../assets/unitree_hand_Dex5/unitree_dex5.yml"
+    UNITREE_DEX5_Unit_Test = "../../assets/unitree_hand_Dex5/unitree_dex5.yml"
     UNITREE_DEX3 = "../assets/unitree_hand/unitree_dex3.yml"
     UNITREE_DEX3_Unit_Test = "../../assets/unitree_hand/unitree_dex3.yml"
     BRAINCO_HAND = "../assets/brainco_hand/brainco.yml"
@@ -15,7 +31,11 @@ class HandType(Enum):
 
 class HandRetargeting:
     def __init__(self, hand_type: HandType):
-        if hand_type == HandType.UNITREE_DEX3:
+        if hand_type == HandType.UNITREE_DEX5:
+            RetargetingConfig.set_default_urdf_dir('../assets')
+        elif hand_type == HandType.UNITREE_DEX5_Unit_Test:
+            RetargetingConfig.set_default_urdf_dir('../../assets')
+        elif hand_type == HandType.UNITREE_DEX3:
             RetargetingConfig.set_default_urdf_dir('../assets')
         elif hand_type == HandType.UNITREE_DEX3_Unit_Test:
             RetargetingConfig.set_default_urdf_dir('../../assets')
@@ -29,6 +49,13 @@ class HandRetargeting:
             RetargetingConfig.set_default_urdf_dir('../../assets')
 
         config_file_path = Path(hand_type.value)
+
+        # Applied to the (25,3) landmarks before retargeting; only Dex5 needs a correction.
+        self.left_landmark_rotation = np.eye(3)
+        self.right_landmark_rotation = np.eye(3)
+        if hand_type in (HandType.UNITREE_DEX5, HandType.UNITREE_DEX5_Unit_Test):
+            self.left_landmark_rotation = DEX5_LANDMARK_ROTATION_LEFT
+            self.right_landmark_rotation = DEX5_LANDMARK_ROTATION_RIGHT
 
         try:
             with config_file_path.open('r') as f:
@@ -57,6 +84,16 @@ class HandRetargeting:
                                                     'right_hand_index_0_joint', 'right_hand_index_1_joint' ]
                 self.left_dex_retargeting_to_hardware = [ self.left_retargeting_joint_names.index(name) for name in self.left_dex3_api_joint_names]
                 self.right_dex_retargeting_to_hardware = [ self.right_retargeting_joint_names.index(name) for name in self.right_dex3_api_joint_names]
+
+            elif hand_type == HandType.UNITREE_DEX5 or hand_type == HandType.UNITREE_DEX5_Unit_Test:
+                self.left_dex5_api_joint_names  = ["Roll_21L", "Pitch_22L", "Pitch_23L", "Pitch_24L", "Roll_31L", "Pitch_32L", "Pitch_33L",
+                                                   "Pitch_34L", "Roll_41L", "Pitch_42L", "Pitch_43L", "Pitch_44L", "Roll_51L", "Pitch_52L",
+                                                   "Pitch_53L", "Pitch_54L", "Yaw_11L", "Roll_12L", "Pitch_13L", "Pitch_14L"]
+                self.right_dex5_api_joint_names = ["Roll_21R", "Pitch_22R", "Pitch_23R", "Pitch_24R", "Roll_31R", "Pitch_32R", "Pitch_33R",
+                                                   "Pitch_34R", "Roll_41R", "Pitch_42R", "Pitch_43R", "Pitch_44R", "Roll_51R", "Pitch_52R",
+                                                   "Pitch_53R", "Pitch_54R", "Yaw_11R", "Roll_12R", "Pitch_13R", "Pitch_14R"]
+                self.left_dex_retargeting_to_hardware = [ self.left_retargeting_joint_names.index(name) for name in self.left_dex5_api_joint_names]
+                self.right_dex_retargeting_to_hardware = [ self.right_retargeting_joint_names.index(name) for name in self.right_dex5_api_joint_names]
 
             elif hand_type == HandType.INSPIRE_HAND or hand_type == HandType.INSPIRE_HAND_Unit_Test:
                 # "Joint Motor Sequence" of https://support.unitree.com/home/en/G1_developer/inspire_dfx_dexterous_hand

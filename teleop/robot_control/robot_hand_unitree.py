@@ -1,7 +1,7 @@
 # for dex3-1
 from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber, ChannelFactoryInitialize # dds
 from unitree_sdk2py.idl.unitree_hg.msg.dds_ import HandCmd_, HandState_                               # idl
-from unitree_sdk2py.idl.default import unitree_hg_msg_dds__HandCmd_
+from unitree_sdk2py.idl.default import unitree_hg_msg_dds__HandCmd_, unitree_hg_msg_dds__MotorCmd_
 # for gripper
 from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber, ChannelFactoryInitialize # dds
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import MotorCmds_, MotorStates_                           # idl
@@ -24,12 +24,174 @@ import logging_mp
 logger_mp = logging_mp.getLogger(__name__)
 
 
+# 20 DDS URDF joint indices drive 16 physical motors; the firmware does the joint->motor
+# transform, so commands and states are indexed by joint, not by motor.
+Dex5_Num_Joints = 20
+Dex5_Thumb_Base_Index = 16
+# Recommended gains from the Dex5-1 DDS doc. The thumb motors report in N*m and the four
+# fingers in mNm, hence the different scale.
+Dex5_Finger_Kp, Dex5_Finger_Kd = 0.10, 0.001
+Dex5_Thumb_Kp, Dex5_Thumb_Kd = 1.0, 0.02
+kTopicDex5LeftCommand = "rt/dex5/left/cmd"
+kTopicDex5RightCommand = "rt/dex5/right/cmd"
+kTopicDex5LeftState = "rt/dex5/left/state"
+kTopicDex5RightState = "rt/dex5/right/state"
+
+class Dex5_1_Controller:
+    def __init__(self, left_hand_array_in, right_hand_array_in, dual_hand_data_lock = None, dual_hand_state_array_out = None,
+                       dual_hand_action_array_out = None, fps = 100.0, Unit_Test = False, simulation_mode = False, xr_motion_data_ready_in = None):
+        """
+        [note] A *_array type parameter requires using a multiprocessing Array, because it needs to be passed to the internal child process
+
+        left_hand_array_in: [input] Left hand skeleton data (required from XR device) to hand_ctrl.control_process
+
+        right_hand_array_in: [input] Right hand skeleton data (required from XR device) to hand_ctrl.control_process
+
+        dual_hand_data_lock: Data synchronization lock for dual_hand_state_array and dual_hand_action_array
+
+        dual_hand_state_array_out: [output] Return left(20), right(20) hand joint state
+
+        dual_hand_action_array_out: [output] Return left(20), right(20) hand joint action
+
+        fps: Control frequency
+
+        Unit_Test: Whether to enable unit testing
+
+        simulation_mode: Whether to use simulation mode (default is False, which means using real robot)
+        """
+        logger_mp.info("Initialize Dex5_1_Controller...")
+
+        self.fps = fps
+        self.Unit_Test = Unit_Test
+        self.simulation_mode = simulation_mode
+        if not self.Unit_Test:
+            self.hand_retargeting = HandRetargeting(HandType.UNITREE_DEX5)
+        else:
+            self.hand_retargeting = HandRetargeting(HandType.UNITREE_DEX5_Unit_Test)
+
+        # initialize handcmd publisher and handstate subscriber
+        self.LeftHandCmb_publisher = ChannelPublisher(kTopicDex5LeftCommand, HandCmd_)
+        self.LeftHandCmb_publisher.Init()
+        self.RightHandCmb_publisher = ChannelPublisher(kTopicDex5RightCommand, HandCmd_)
+        self.RightHandCmb_publisher.Init()
+
+        self.LeftHandState_subscriber = ChannelSubscriber(kTopicDex5LeftState, HandState_)
+        self.LeftHandState_subscriber.Init()
+        self.RightHandState_subscriber = ChannelSubscriber(kTopicDex5RightState, HandState_)
+        self.RightHandState_subscriber.Init()
+
+        # Shared Arrays for hand states
+        self.left_hand_state_array  = Array('d', Dex5_Num_Joints, lock=True)
+        self.right_hand_state_array = Array('d', Dex5_Num_Joints, lock=True)
+
+        # initialize subscribe thread
+        self.subscribe_state_thread = threading.Thread(target=self._subscribe_hand_state)
+        self.subscribe_state_thread.daemon = True
+        self.subscribe_state_thread.start()
+
+        while True:
+            if any(self.left_hand_state_array) and any(self.right_hand_state_array):
+                break
+            time.sleep(0.01)
+            logger_mp.warning("[Dex5_1_Controller] Waiting to subscribe dds...")
+        logger_mp.info("[Dex5_1_Controller] Subscribe dds ok.")
+
+        hand_control_process = Process(target=self.control_process, args=(left_hand_array_in, right_hand_array_in,  self.left_hand_state_array, self.right_hand_state_array,
+                                                                          dual_hand_data_lock, dual_hand_state_array_out, dual_hand_action_array_out, xr_motion_data_ready_in))
+        hand_control_process.daemon = True
+        hand_control_process.start()
+
+        logger_mp.info("Initialize Dex5_1_Controller OK!")
+
+    def _subscribe_hand_state(self):
+        while True:
+            left_hand_msg  = self.LeftHandState_subscriber.Read()
+            right_hand_msg = self.RightHandState_subscriber.Read()
+            if left_hand_msg is not None and right_hand_msg is not None:
+                for idx in range(Dex5_Num_Joints):
+                    self.left_hand_state_array[idx]  = left_hand_msg.motor_state[idx].q
+                    self.right_hand_state_array[idx] = right_hand_msg.motor_state[idx].q
+            time.sleep(0.002)
+
+    def ctrl_dual_hand(self, left_q_target, right_q_target):
+        """set current left, right hand joint target q"""
+        for idx in range(Dex5_Num_Joints):
+            self.left_msg.motor_cmd[idx].q  = left_q_target[idx]
+            self.right_msg.motor_cmd[idx].q = right_q_target[idx]
+
+        self.LeftHandCmb_publisher.Write(self.left_msg)
+        self.RightHandCmb_publisher.Write(self.right_msg)
+        # logger_mp.debug("hand ctrl publish ok.")
+    
+    def control_process(self, left_hand_array_in, right_hand_array_in, left_hand_state_array, right_hand_state_array,
+                              dual_hand_data_lock = None, dual_hand_state_array_out = None, dual_hand_action_array_out = None, xr_motion_data_ready_in = None):
+        self.running = True
+
+        left_q_target  = np.full(Dex5_Num_Joints, 0.0)
+        right_q_target = np.full(Dex5_Num_Joints, 0.0)
+
+        # initialize dex5-1's cmd msgs. The default factory sizes motor_cmd for dex3's 7
+        # motors, so the sequence has to be rebuilt at the dex5 joint count.
+        self.left_msg  = unitree_hg_msg_dds__HandCmd_()
+        self.right_msg = unitree_hg_msg_dds__HandCmd_()
+        for msg in (self.left_msg, self.right_msg):
+            msg.motor_cmd = [unitree_hg_msg_dds__MotorCmd_() for _ in range(Dex5_Num_Joints)]
+            for idx in range(Dex5_Num_Joints):
+                is_thumb = idx >= Dex5_Thumb_Base_Index
+                msg.motor_cmd[idx].mode = 0x01  # position control
+                msg.motor_cmd[idx].q    = 0.0
+                msg.motor_cmd[idx].dq   = 0.0
+                msg.motor_cmd[idx].tau  = 0.0
+                msg.motor_cmd[idx].kp   = Dex5_Thumb_Kp if is_thumb else Dex5_Finger_Kp
+                msg.motor_cmd[idx].kd   = Dex5_Thumb_Kd if is_thumb else Dex5_Finger_Kd
+
+        try:
+            while self.running:
+                start_time = time.time()
+                # get dual hand state
+                with left_hand_array_in.get_lock():
+                    left_hand_data  = np.array(left_hand_array_in[:]).reshape(25, 3).copy()
+                with right_hand_array_in.get_lock():
+                    right_hand_data = np.array(right_hand_array_in[:]).reshape(25, 3).copy()
+                # align the landmarks with the Dex5 URDF frame (per side: the URDFs mirror in z)
+                left_hand_data  = left_hand_data  @ self.hand_retargeting.left_landmark_rotation.T
+                right_hand_data = right_hand_data @ self.hand_retargeting.right_landmark_rotation.T
+                if xr_motion_data_ready_in is not None:
+                    with xr_motion_data_ready_in.get_lock():
+                        xr_motion_data_ready = xr_motion_data_ready_in.value
+                else:
+                    xr_motion_data_ready = True
+
+                # Read left and right q_state from shared arrays
+                state_data = np.concatenate((np.array(left_hand_state_array[:]), np.array(right_hand_state_array[:])))
+
+                if xr_motion_data_ready:
+                    ref_left_value = left_hand_data[self.hand_retargeting.left_indices[1,:]] - left_hand_data[self.hand_retargeting.left_indices[0,:]]
+                    ref_right_value = right_hand_data[self.hand_retargeting.right_indices[1,:]] - right_hand_data[self.hand_retargeting.right_indices[0,:]]
+
+                    left_q_target  = self.hand_retargeting.left_retargeting.retarget(ref_left_value)[self.hand_retargeting.left_dex_retargeting_to_hardware]
+                    right_q_target = self.hand_retargeting.right_retargeting.retarget(ref_right_value)[self.hand_retargeting.right_dex_retargeting_to_hardware]
+
+                # get dual hand action
+                action_data = np.concatenate((left_q_target, right_q_target))    
+                if dual_hand_state_array_out and dual_hand_action_array_out:
+                    with dual_hand_data_lock:
+                        dual_hand_state_array_out[:] = state_data
+                        dual_hand_action_array_out[:] = action_data
+
+                self.ctrl_dual_hand(left_q_target, right_q_target)
+                current_time = time.time()
+                time_elapsed = current_time - start_time
+                sleep_time = max(0, (1 / self.fps) - time_elapsed)
+                time.sleep(sleep_time)
+        finally:
+            logger_mp.info("Dex5_1_Controller has been closed.")
+
 Dex3_Num_Motors = 7
 kTopicDex3LeftCommand = "rt/dex3/left/cmd"
 kTopicDex3RightCommand = "rt/dex3/right/cmd"
 kTopicDex3LeftState = "rt/dex3/left/state"
 kTopicDex3RightState = "rt/dex3/right/state"
-
 
 class Dex3_1_Controller:
     def __init__(self, left_hand_array_in, right_hand_array_in, dual_hand_data_lock = None, dual_hand_state_array_out = None,
@@ -413,7 +575,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--xr-mode', type=str, choices=['hand', 'controller'], default='hand', help='Select XR device tracking source')
-    parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'inspire1', 'brainco'], help='Select end effector controller')
+    parser.add_argument('--ee', type=str, choices=['dex1', 'dex3', 'dex5', 'inspire1', 'brainco'], help='Select end effector controller')
     args = parser.parse_args()
     logger_mp.info(f"args:{args}\n")
 
@@ -437,6 +599,13 @@ if __name__ == "__main__":
         dual_hand_state_array = Array('d', 14, lock = False)   # [output] current left, right hand state(14) data.
         dual_hand_action_array = Array('d', 14, lock = False)  # [output] current left, right hand action(14) data.
         hand_ctrl = Dex3_1_Controller(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array)
+    elif args.ee == "dex5":
+        left_hand_pos_array = Array('d', 75, lock = True)      # [input]
+        right_hand_pos_array = Array('d', 75, lock = True)     # [input]
+        dual_hand_data_lock = Lock()
+        dual_hand_state_array = Array('d', 40, lock = False)   # [output] current left, right hand state(40) data.
+        dual_hand_action_array = Array('d', 40, lock = False)  # [output] current left, right hand action(40) data.
+        hand_ctrl = Dex5_1_Controller(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, Unit_Test=True)
     elif args.ee == "dex1":
         left_gripper_value = Value('d', 0.0, lock=True)        # [input]
         right_gripper_value = Value('d', 0.0, lock=True)       # [input]
@@ -451,7 +620,7 @@ if __name__ == "__main__":
             head_img, head_img_fps = img_client.get_head_frame()
             tv_wrapper.set_display_image(head_img)
             tele_data = tv_wrapper.get_tele_data()
-            if args.ee == "dex3" and args.xr_mode == "hand":
+            if args.ee in ("dex3", "dex5") and args.xr_mode == "hand":
                 with left_hand_pos_array.get_lock():
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
                 with right_hand_pos_array.get_lock():
