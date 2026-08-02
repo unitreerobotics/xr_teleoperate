@@ -64,6 +64,58 @@ class DataBuffer:
         with self.lock:
             self.data = data
 
+class LinkWatchdog:
+    '''Warn loudly when the robot stops being heard on dds.
+
+    A dead dds link is invisible from the publish side: ChannelPublisher.Write() returns True
+    even when the underlying sendmsg fails, because cyclone writes asynchronously and only logs
+    the transport error. So the arms silently hold their last commanded pose while every other
+    part of the program keeps running normally -- which reads as a frozen-arm bug rather than a
+    network one. The reliable signal is the *inbound* lowstate stream: if we can no longer hear
+    the robot, our commands are not reaching it either.
+
+    Seen on WSL mirrored networking, where a dhcp renewal on an unrelated adapter broke this
+    process's sockets mid-session; the robot's participants then lease-expired and the arms
+    stopped tracking while mode toggles and the finger controller (a separate process, with its
+    own participant) carried on.
+    '''
+    def __init__(self, name, stale_after = 0.5, repeat_every = 5.0):
+        self.name = name
+        self.stale_after = stale_after      # seconds without lowstate before the link is declared down
+        self.repeat_every = repeat_every    # seconds between repeats of the "still down" warning
+        self.alive = True
+        self.last_rx = time.time()          # assume healthy at construction; the caller waits for lowstate first
+        self._last_warn = 0.0
+        self._lock = threading.Lock()
+
+    def feed(self):
+        '''Called from the subscribe thread on every lowstate message.'''
+        now = time.time()
+        self.last_rx = now
+        if not self.alive:
+            with self._lock:
+                if not self.alive:
+                    self.alive = True
+                    logger_mp.info(f"[{self.name}] dds link RECOVERED, arms tracking again.")
+
+    def check(self):
+        '''Called from the publish loop. Returns True while the link is healthy.'''
+        silent_for = time.time() - self.last_rx
+        if silent_for <= self.stale_after:
+            return True
+        with self._lock:
+            now = time.time()
+            if self.alive:
+                self.alive = False
+                self._last_warn = now
+                logger_mp.error(f"[{self.name}] dds link DOWN: no lowstate for {silent_for:.1f}s. "
+                                f"Arm commands are not reaching the robot -- the arms will hold "
+                                f"their last pose. Check the network interface and dds discovery.")
+            elif now - self._last_warn >= self.repeat_every:
+                self._last_warn = now
+                logger_mp.error(f"[{self.name}] dds link still DOWN ({silent_for:.1f}s without lowstate).")
+        return False
+
 class G1_29_ArmController:
     def __init__(self, motion_mode = False, simulation_mode = False):
         logger_mp.info("Initialize G1_29_ArmController...")
@@ -94,6 +146,7 @@ class G1_29_ArmController:
         self.lowstate_subscriber = ChannelSubscriber(kTopicLowState, hg_LowState)
         self.lowstate_subscriber.Init()
         self.lowstate_buffer = DataBuffer()
+        self.link = LinkWatchdog(type(self).__name__)
 
         # initialize subscribe thread
         self.subscribe_thread = threading.Thread(target=self._subscribe_motor_state)
@@ -153,6 +206,7 @@ class G1_29_ArmController:
                     lowstate.motor_state[id].q  = msg.motor_state[id].q
                     lowstate.motor_state[id].dq = msg.motor_state[id].dq
                 self.lowstate_buffer.SetData(lowstate)
+                self.link.feed()
             time.sleep(0.002)
 
     def clip_arm_q_target(self, target_q, velocity_limit):
@@ -184,6 +238,7 @@ class G1_29_ArmController:
                 self.msg.motor_cmd[id].tau = arm_tauff_target[idx]   
 
             self.msg.crc = self.crc.Crc(self.msg)
+            self.link.check()   # warn if the robot has gone silent; Write() below cannot tell us
             self.lowcmd_publisher.Write(self.msg)
 
             if self._speed_gradual_max is True:
@@ -377,6 +432,7 @@ class G1_23_ArmController:
         self.lowstate_subscriber = ChannelSubscriber(kTopicLowState, hg_LowState)
         self.lowstate_subscriber.Init()
         self.lowstate_buffer = DataBuffer()
+        self.link = LinkWatchdog(type(self).__name__)
 
         # initialize subscribe thread
         self.subscribe_thread = threading.Thread(target=self._subscribe_motor_state)
@@ -436,6 +492,7 @@ class G1_23_ArmController:
                     lowstate.motor_state[id].q  = msg.motor_state[id].q
                     lowstate.motor_state[id].dq = msg.motor_state[id].dq
                 self.lowstate_buffer.SetData(lowstate)
+                self.link.feed()
             time.sleep(0.002)
 
     def clip_arm_q_target(self, target_q, velocity_limit):
@@ -467,6 +524,7 @@ class G1_23_ArmController:
                 self.msg.motor_cmd[id].tau = arm_tauff_target[idx]      
 
             self.msg.crc = self.crc.Crc(self.msg)
+            self.link.check()   # warn if the robot has gone silent; Write() below cannot tell us
             self.lowcmd_publisher.Write(self.msg)
 
             if self._speed_gradual_max is True:
@@ -652,6 +710,7 @@ class H1_2_ArmController:
         self.lowstate_subscriber = ChannelSubscriber(kTopicLowState, hg_LowState)
         self.lowstate_subscriber.Init()
         self.lowstate_buffer = DataBuffer()
+        self.link = LinkWatchdog(type(self).__name__)
 
         # initialize subscribe thread
         self.subscribe_thread = threading.Thread(target=self._subscribe_motor_state)
@@ -711,6 +770,7 @@ class H1_2_ArmController:
                     lowstate.motor_state[id].q  = msg.motor_state[id].q
                     lowstate.motor_state[id].dq = msg.motor_state[id].dq
                 self.lowstate_buffer.SetData(lowstate)
+                self.link.feed()
             time.sleep(0.002)
 
     def clip_arm_q_target(self, target_q, velocity_limit):
@@ -742,6 +802,7 @@ class H1_2_ArmController:
                 self.msg.motor_cmd[id].tau = arm_tauff_target[idx]      
 
             self.msg.crc = self.crc.Crc(self.msg)
+            self.link.check()   # warn if the robot has gone silent; Write() below cannot tell us
             self.lowcmd_publisher.Write(self.msg)
 
             if self._speed_gradual_max is True:
@@ -927,6 +988,7 @@ class H1_ArmController:
         self.lowstate_subscriber = ChannelSubscriber(kTopicLowState, go_LowState)
         self.lowstate_subscriber.Init()
         self.lowstate_buffer = DataBuffer()
+        self.link = LinkWatchdog(type(self).__name__)
 
         # initialize subscribe thread
         self.subscribe_thread = threading.Thread(target=self._subscribe_motor_state)
@@ -980,6 +1042,7 @@ class H1_ArmController:
                     lowstate.motor_state[id].q  = msg.motor_state[id].q
                     lowstate.motor_state[id].dq = msg.motor_state[id].dq
                 self.lowstate_buffer.SetData(lowstate)
+                self.link.feed()
             time.sleep(0.002)
 
     def clip_arm_q_target(self, target_q, velocity_limit):
@@ -1008,6 +1071,7 @@ class H1_ArmController:
                 self.msg.motor_cmd[id].tau = arm_tauff_target[idx]      
 
             self.msg.crc = self.crc.Crc(self.msg)
+            self.link.check()   # warn if the robot has gone silent; Write() below cannot tell us
             self.lowcmd_publisher.Write(self.msg)
 
             if self._speed_gradual_max is True:
@@ -1151,6 +1215,7 @@ class H2_ArmController:
         self.lowstate_subscriber = ChannelSubscriber(kTopicLowState, hg_LowState)
         self.lowstate_subscriber.Init()
         self.lowstate_buffer = DataBuffer()
+        self.link = LinkWatchdog(type(self).__name__)
 
         # initialize subscribe thread
         self.subscribe_thread = threading.Thread(target=self._subscribe_motor_state)
@@ -1213,6 +1278,7 @@ class H2_ArmController:
                     lowstate.motor_state[id].q = msg.motor_state[id].q
                     lowstate.motor_state[id].dq = msg.motor_state[id].dq
                 self.lowstate_buffer.SetData(lowstate)
+                self.link.feed()
             time.sleep(0.002)
 
     def clip_arm_q_target(self, target_q, velocity_limit):
@@ -1244,6 +1310,7 @@ class H2_ArmController:
                 self.msg.motor_cmd[id].tau = arm_tauff_target[idx]
 
             self.msg.crc = self.crc.Crc(self.msg)
+            self.link.check()   # warn if the robot has gone silent; Write() below cannot tell us
             self.lowcmd_publisher.Write(self.msg)
 
             if self._speed_gradual_max is True:
