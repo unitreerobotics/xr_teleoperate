@@ -224,7 +224,7 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 
 | ⚙️ Parameter  |                        📜 Description                         |
 | :----------: | :----------------------------------------------------------: |
-|  `--motion`  | **Enable motion control mode** When enabled, the teleoperation program can run alongside the robot’s motion control program.In **hand tracking** mode, the [R3 controller](https://www.unitree.com/cn/R3) can be used to control normal robot walking; in **controller tracking** mode, joysticks can also control the robot’s movement.<br />Note: Only `Regular mode` (R1+X) is supported, `Running mode` (R2+A) is not supported. |
+|  `--motion`  | **Enable motion control mode** When enabled, the teleoperation program can run alongside the robot’s motion control program.In **hand tracking** mode, a **double head-nod** toggles between manipulating and walking (the arms become the joystick), and the [R3 controller](https://www.unitree.com/cn/R3) can also be used to control normal robot walking; in **controller tracking** mode, joysticks can also control the robot’s movement.<br />See [Locomotion document](Locomotion.md) for the axis mapping, the nod gesture and its tuning.<br />Note: Only `Regular mode` (R1+X) is supported, `Running mode` (R2+A) is not supported. |
 | `--headless` | **Enable headless mode** For running the program on devices without a display, e.g., the Development Computing Unit (PC2). |
 |   `--sim`    | **Enable [simulation mode](https://github.com/unitreerobotics/unitree_sim_isaaclab)** |
 |   `--ipc`    | **Inter-process communication mode** Allows controlling the xr_teleoperate program’s state via IPC. Suitable for interaction with agent programs. |
@@ -239,6 +239,12 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
     <img src="https://oss-global-cdn.unitree.com/static/712c312b0ac3401f8d7d9001b1e14645_11655x4305.jpg" alt="System Diagram" style="width: 85%;">
   </a>
 </p>
+
+## 1.5 🚶 Locomotion
+
+Walking is available from **both** input modes. For the shared axis mapping, the controller
+walk/finger mode machine, and the double-nod gesture that switches states in hand tracking mode,
+please see [Locomotion document](Locomotion.md).
 
 # 2. 💻 Simulation Deployment
 
