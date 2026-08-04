@@ -16,11 +16,7 @@ class WeightedMovingFilter:
             return self._data_queue[-1]
 
         data_array = np.array(self._data_queue)
-        temp_filtered_data = np.zeros(self._data_size)
-        for i in range(self._data_size):
-            temp_filtered_data[i] = np.convolve(data_array[:, i], self._weights, mode='valid')[-1]
-        
-        return temp_filtered_data
+        return np.sum(data_array * self._weights[::-1, None], axis=0)
 
     def add_data(self, new_data):
         assert len(new_data) == self._data_size

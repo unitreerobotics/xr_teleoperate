@@ -169,6 +169,7 @@ class Inspire_Controller_FTP:
         logger_mp.info("Initialize Inspire_Controller_FTP...")
         from inspire_sdkpy import inspire_dds  # lazy import
         import inspire_sdkpy.inspire_hand_defaut as inspire_hand_default
+        self.inspire_hand_default = inspire_hand_default
         self.fps = fps
         self.Unit_Test = Unit_Test
         self.simulation_mode = simulation_mode
@@ -247,13 +248,13 @@ class Inspire_Controller_FTP:
         Send scaled angle commands [0-1000] to both hands.
         """
         # Left Hand Command
-        left_cmd_msg = inspire_hand_default.get_inspire_hand_ctrl()
+        left_cmd_msg = self.inspire_hand_default.get_inspire_hand_ctrl()
         left_cmd_msg.angle_set = left_angle_cmd_scaled
         left_cmd_msg.mode = 0b0001 # Mode 1: Angle control
         self.LeftHandCmd_publisher.Write(left_cmd_msg)
 
         # Right Hand Command
-        right_cmd_msg = inspire_hand_default.get_inspire_hand_ctrl()
+        right_cmd_msg = self.inspire_hand_default.get_inspire_hand_ctrl()
         right_cmd_msg.angle_set = right_angle_cmd_scaled
         right_cmd_msg.mode = 0b0001 # Mode 1: Angle control
         self.RightHandCmd_publisher.Write(right_cmd_msg)
