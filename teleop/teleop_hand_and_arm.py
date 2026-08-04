@@ -20,6 +20,7 @@ from teleimager.image_client import ImageClient
 from teleop.utils.episode_writer import EpisodeWriter
 from teleop.utils.ipc import IPC_Server
 from teleop.utils.motion_switcher import MotionSwitcher, LocoClientWrapper
+from teleop.utils.hand_walk import HandWalkController
 from sshkeyboard import listen_keyboard, stop_listening
 
 # for simulation
@@ -140,7 +141,9 @@ if __name__ == '__main__':
         
         # motion mode (G1: Regular mode R1+X, not Running mode R2+A)
         if args.motion:
-            if args.input_mode == "controller":
+            if args.input_mode in ("controller", "hand"):
+                # Hand mode also needs the loco client: the operator double-nods into WALK mode
+                # and steers with arm displacement (see the main loop + teleop.utils.hand_walk).
                 loco_wrapper = LocoClientWrapper()
         else:
             motion_switcher = MotionSwitcher()
@@ -186,8 +189,19 @@ if __name__ == '__main__':
             arm_ctrl = R1_A7_ArmController(motion_mode=args.motion, simulation_mode=args.sim)
 
         # end-effector
-        if args.ee in ("dex3", "inspire_ftp", "inspire_dfx") and args.input_mode == "controller":
+        # inspire_dfx is deliberately absent here: this branch adds controller-mode support
+        # for it (walk + finger grasp), handled by the elif below.
+        if args.ee in ("dex3", "inspire_ftp") and args.input_mode == "controller":
             raise ValueError(f"{args.ee} does not support controller input mode.")
+        elif args.ee == "inspire_dfx" and args.input_mode == "controller":
+            # walk + grasp: inspire fingers driven by the controllers, legs by the thumbsticks.
+            # Right-stick press -> finger mode (legs stop); left-stick press -> walk mode.
+            from teleop.robot_control.robot_hand_inspire import Inspire_Controller_Ctrl
+            left_ctrl_input  = Array('d', 6, lock=True)   # [stick_x, stick_y, trigger, squeeze, toward_btn, away_btn]
+            right_ctrl_input = Array('d', 6, lock=True)
+            left_ctrl_input[:]  = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]   # neutral (no finger motion)
+            right_ctrl_input[:] = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]
+            hand_ctrl = Inspire_Controller_Ctrl(left_ctrl_input, right_ctrl_input, simulation_mode=args.sim)
         elif args.ee == "dex3":
             from teleop.robot_control.robot_hand_unitree import Dex3_1_Controller
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
@@ -206,7 +220,7 @@ if __name__ == '__main__':
             dual_gripper_action_array = Array('d', 2, lock=False)  # current left, right gripper action(2) data.
             gripper_ctrl = Dex1_1_Gripper_Controller(left_gripper_value, right_gripper_value, dual_gripper_data_lock, 
                                                      dual_gripper_state_array, dual_gripper_action_array, simulation_mode=args.sim, xr_motion_data_ready_in=xr_motion_data_ready)
-        elif args.ee == "inspire_dfx":
+        elif args.ee == "inspire_dfx" and args.input_mode == "hand":
             from teleop.robot_control.robot_hand_inspire import Inspire_Controller_DFX
             left_hand_pos_array = Array('d', 75, lock = True)      # [input]
             right_hand_pos_array = Array('d', 75, lock = True)     # [input]
@@ -283,6 +297,19 @@ if __name__ == '__main__':
         left_wrist_img = None
         right_wrist_img = None
 
+        # controller-mode walk/finger state: right-stick press -> finger mode (legs stop),
+        # left-stick press -> walk mode (legs move, no fingers). Edge-detected via prev_*_press.
+        finger_mode = False
+        prev_l_press = False
+        prev_r_press = False
+
+        # hand-mode walk state: a double head-nod toggles WALK <-> HAND-TRACK. In WALK the arms
+        # become the joystick (frozen at frozen_sol_q so they don't flail while steering).
+        hand_walk = HandWalkController() if (args.input_mode == "hand" and args.motion) else None
+        walk_mode = False
+        frozen_sol_q = None
+        frozen_sol_tauff = None
+
         # main loop. robot start to follow VR user's motion
         while not STOP:
             start_time = time.time()
@@ -316,10 +343,13 @@ if __name__ == '__main__':
             # get xr's tele data
             tele_data = tv_wrapper.get_tele_data()
             if args.ee in ("dex3", "inspire_ftp", "inspire_dfx", "brainco")  and args.input_mode == "hand":
-                with left_hand_pos_array.get_lock():
-                    left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
-                with right_hand_pos_array.get_lock():
-                    right_hand_pos_array[:] = tele_data.right_hand_pos.flatten()
+                # Don't track fingers while walking: the hands are steering, so hold their last
+                # pose (skip the update) instead of retargeting the steering motion into a grasp.
+                if not walk_mode:
+                    with left_hand_pos_array.get_lock():
+                        left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
+                    with right_hand_pos_array.get_lock():
+                        right_hand_pos_array[:] = tele_data.right_hand_pos.flatten()
             elif args.ee == "brainco" and args.input_mode == "controller":
                 with left_gripper_trigger_in.get_lock():
                     left_gripper_trigger_in.value = tele_data.left_ctrl_triggerValue
@@ -346,17 +376,64 @@ if __name__ == '__main__':
             
             # high level control
             if args.input_mode == "controller" and args.motion:
-                # quit teleoperate
-                if tele_data.right_ctrl_aButton:
-                    START = False
-                    STOP = True
+                l_press = tele_data.left_ctrl_thumbstick
+                r_press = tele_data.right_ctrl_thumbstick
                 # command robot to enter damping mode. soft emergency stop function
-                if tele_data.left_ctrl_thumbstick and tele_data.right_ctrl_thumbstick:
-                    loco_wrapper.Damp()
-                # https://github.com/unitreerobotics/xr_teleoperate/issues/135, control, limit velocity to within 0.3
-                loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
-                                  -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
-                                  -tele_data.right_ctrl_thumbstickValue[0]* 0.3)
+                if l_press and r_press:
+                    loco_wrapper.Enter_Damp_Mode()   # both sticks pressed = soft e-stop
+                else:
+                    # mode toggle (rising edges): right stick -> finger mode, left stick -> walk mode
+                    if r_press and not prev_r_press:
+                        finger_mode = True
+                    if l_press and not prev_l_press:
+                        finger_mode = False
+                    if finger_mode:
+                        loco_wrapper.Move(0.0, 0.0, 0.0)   # legs stop while controlling fingers
+                    else:
+                        # quit teleoperate (A) — only in walk mode; A drives the right thumb in finger mode
+                        if tele_data.right_ctrl_aButton:
+                            START = False
+                            STOP = True
+                        # https://github.com/unitreerobotics/xr_teleoperate/issues/135, limit velocity to within 0.3
+                        loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
+                                          -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
+                                          -tele_data.right_ctrl_thumbstickValue[0]* 0.3)
+                prev_l_press = l_press
+                prev_r_press = r_press
+
+                # feed the inspire finger controller (Y/B = thumb toward palm, X/A = thumb away)
+                if args.ee == "inspire_dfx":
+                    if finger_mode:
+                        left_ctrl_input[:] = [float(tele_data.left_ctrl_thumbstickValue[0]),
+                                              float(tele_data.left_ctrl_thumbstickValue[1]),
+                                              float(tele_data.left_ctrl_triggerValue),
+                                              float(tele_data.left_ctrl_squeezeValue),
+                                              1.0 if tele_data.left_ctrl_bButton else 0.0,   # Y -> left thumb toward
+                                              1.0 if tele_data.left_ctrl_aButton else 0.0]   # X -> left thumb away
+                        right_ctrl_input[:] = [float(tele_data.right_ctrl_thumbstickValue[0]),
+                                               float(tele_data.right_ctrl_thumbstickValue[1]),
+                                               float(tele_data.right_ctrl_triggerValue),
+                                               float(tele_data.right_ctrl_squeezeValue),
+                                               1.0 if tele_data.right_ctrl_bButton else 0.0,  # B -> right thumb toward
+                                               1.0 if tele_data.right_ctrl_aButton else 0.0]  # A -> right thumb away
+                    else:
+                        left_ctrl_input[:]  = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]   # neutral: no finger motion
+                        right_ctrl_input[:] = [0.0, 0.0, 10.0, 0.0, 0.0, 0.0]
+
+            # hand-mode high level control: double-nod toggles WALK <-> HAND-TRACK; in WALK,
+            # arm displacement drives the legs with the same axis mapping as the thumbsticks.
+            if args.input_mode == "hand" and args.motion:
+                if tele_data.motion_data_ready:
+                    hw = hand_walk.update(tv_wrapper.tvuer.head_pose,
+                                          tele_data.left_wrist_pose, tele_data.right_wrist_pose,
+                                          time.time())
+                    if hw["toggled"]:
+                        walk_mode = hw["walk_mode"]
+                        logger_mp.info(f"[hand-walk] nod -> {'WALK (arms steer)' if walk_mode else 'HAND-TRACK (manipulate)'} mode")
+                    loco_wrapper.Move(hw["vx"], hw["vy"], hw["vyaw"])
+                else:
+                    # No fresh XR tracking (e.g. headset removed/occluded): never keep walking.
+                    loco_wrapper.Move(0.0, 0.0, 0.0)
 
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
@@ -367,7 +444,14 @@ if __name__ == '__main__':
             sol_q, sol_tauff  = arm_ik.solve_ik(tele_data.left_wrist_pose, tele_data.right_wrist_pose, current_lr_arm_q, current_lr_arm_dq)
             time_ik_end = time.time()
             logger_mp.debug(f"ik:\t{round(time_ik_end - time_ik_start, 6)}")
-            arm_ctrl.ctrl_dual_arm(sol_q, sol_tauff)
+            if walk_mode and frozen_sol_q is not None:
+                # WALK mode: arms are the joystick -> hold them at the pose captured on entry
+                # instead of tracking, so steering motion doesn't make the robot arms flail.
+                arm_ctrl.ctrl_dual_arm(frozen_sol_q, frozen_sol_tauff)
+            else:
+                arm_ctrl.ctrl_dual_arm(sol_q, sol_tauff)
+                # keep the latest tracked pose as the freeze target for the next WALK toggle
+                frozen_sol_q, frozen_sol_tauff = sol_q, sol_tauff
 
             # record data
             if args.record:
