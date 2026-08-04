@@ -82,6 +82,129 @@ it drives the right thumb away from the palm, so quitting requires a left-stick 
 Pressing **both sticks together** is the soft e-stop and calls `Enter_Damp_Mode()`, regardless of
 which mode is active.
 
+## 🖐️ Finger mapping in finger mode
+
+Each controller drives **its own hand** — left controller to left hand, right to right. The two
+sides are identical apart from the button letters, which differ because the left controller carries
+X/Y and the right carries A/B.
+
+```mermaid
+flowchart LR
+  subgraph LC["Left controller"]
+    LT["Trigger"]
+    LG["Grip / squeeze"]
+    LY["Y button"]
+    LX["X button"]
+    LS["Thumbstick<br/>8 directions"]
+  end
+
+  subgraph LH["LEFT hand"]
+    direction TB
+    L4["thumb bend<br/>idx 4"]
+    L5["thumb rotate<br/>idx 5"]
+    L3["index - idx 3"]
+    L2["middle - idx 2"]
+    L1["ring - idx 1"]
+    L0["pinky - idx 0"]
+  end
+
+  LT -- "curl IN" --> L4
+  LG -- "curl OUT" --> L4
+  LY -- "toward palm" --> L5
+  LX -- "away from palm" --> L5
+  LS -- "fwd / back" --> L3
+  LS -- "right / left" --> L2
+  LS -- "NE / SW" --> L1
+  LS -- "NW / SE" --> L0
+
+  subgraph RC["Right controller"]
+    RT["Trigger"]
+    RG["Grip / squeeze"]
+    RB["B button"]
+    RA["A button"]
+    RS["Thumbstick<br/>8 directions"]
+  end
+
+  subgraph RH["RIGHT hand"]
+    direction TB
+    R4["thumb bend<br/>idx 4"]
+    R5["thumb rotate<br/>idx 5"]
+    R3["index - idx 3"]
+    R2["middle - idx 2"]
+    R1["ring - idx 1"]
+    R0["pinky - idx 0"]
+  end
+
+  RT -- "curl IN" --> R4
+  RG -- "curl OUT" --> R4
+  RB -- "toward palm" --> R5
+  RA -- "away from palm" --> R5
+  RS -- "fwd / back" --> R3
+  RS -- "right / left" --> R2
+  RS -- "NE / SW" --> R1
+  RS -- "NW / SE" --> R0
+```
+
+### 🧭 The thumbstick rose
+
+The four fingers share one thumbstick, split across its **8 directions** — each axis pairs a
+*close* direction with its opposite *open* direction:
+
+```
+                        forward
+                      INDEX close
+                            │
+          NW                │                NE
+      PINKY close           │           RING close
+                ╲           │           ╱
+                  ╲         │         ╱
+                    ╲       │       ╱
+     left ───────────────── ● ───────────────── right
+  MIDDLE open               │               MIDDLE close
+                    ╱       │       ╲
+                  ╱         │         ╲
+                ╱           │           ╲
+          SW                │                SE
+       RING open            │          PINKY open
+                            │
+                          back
+                       INDEX open
+```
+
+Only **one finger moves at a time**. Two gates enforce it: the stick must be pushed past
+`MAG_THRESH` (0.6) before anything moves, and the direction must fall within `DOT_THRESH` (0.94,
+about 20°) of one of the eight vectors. Push the stick between two directions and *nothing*
+happens — which is deliberate, but means the four diagonals need a more accurate push than the
+cardinals.
+
+### 📋 Full mapping
+
+| Input | Left controller | Right controller | Target | Effect |
+| :---- | :-------------- | :--------------- | :----- | :----- |
+| Trigger | trigger | trigger | thumb bend (idx 4) | curl **in** (toward closed) |
+| Grip | squeeze | squeeze | thumb bend (idx 4) | curl **out** (toward open) |
+| Thumb rotate toward palm | **Y** | **B** | thumb rotation (idx 5) | rotate toward palm |
+| Thumb rotate away | **X** | **A** | thumb rotation (idx 5) | rotate away from palm |
+| Stick forward / back | stick | stick | index (idx 3) | close / open |
+| Stick right / left | stick | stick | middle (idx 2) | close / open |
+| Stick NE / SW | stick | stick | ring (idx 1) | close / open |
+| Stick NW / SE | stick | stick | pinky (idx 0) | close / open |
+
+Targets are held in DDS `q` space where **0 = closed and 1 = open**, start fully open, and are
+rate-integrated rather than absolute: holding an input moves the finger at `STEP` per frame, so at
+100 fps a finger travels its full range in about **1 second**. Release and it simply stops where
+it is — there is no spring-back.
+
+> ⚠️ Unlike the nod and walk parameters, these are **class constants in
+> `Inspire_Controller_Ctrl`, not environment variables** — changing them needs a code edit.
+>
+> | Constant | Default | Effect |
+> | :------- | :------ | :----- |
+> | `STEP` | `0.01` | Per-frame travel. Full range in ~1 s at 100 fps. |
+> | `MAG_THRESH` | `0.6` | How far the stick must be pushed before a finger moves. |
+> | `DOT_THRESH` | `0.94` | Angular tolerance, ~20°. Lower it if diagonals feel fussy. |
+> | `TOWARD_SIGN` | `-1.0` | Flip if thumb rotation goes the wrong way. |
+
 ---
 
 # 🙆 Hand mode: nodding to switch states
