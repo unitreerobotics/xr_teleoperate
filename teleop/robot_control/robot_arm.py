@@ -1595,8 +1595,8 @@ class H2_ArmController:
 
     def _Is_weak_motor(self, motor_index):
         weak_motors = [
-            H2_JointIndex.kLeftAnklePitch.value,
-            H2_JointIndex.kRightAnklePitch.value,
+            H2_JointIndex.kLeftAnkleRoll.value,
+            H2_JointIndex.kRightAnkleRoll.value,
             # Left arm
             H2_JointIndex.kLeftShoulderPitch.value,
             H2_JointIndex.kLeftShoulderRoll.value,
@@ -1647,16 +1647,16 @@ class H2_JointIndex(IntEnum):
     kLeftHipRoll = 1
     kLeftHipYaw = 2
     kLeftKnee = 3
-    kLeftAnklePitch = 4
-    kLeftAnkleRoll = 5
+    kLeftAnkleRoll = 4
+    kLeftAnklePitch = 5
 
     # Right leg
     kRightHipPitch = 6
     kRightHipRoll = 7
     kRightHipYaw = 8
     kRightKnee = 9
-    kRightAnklePitch = 10
-    kRightAnkleRoll = 11
+    kRightAnkleRoll = 10
+    kRightAnklePitch = 11
 
     kWaistYaw = 12
     kWaistRoll = 13
