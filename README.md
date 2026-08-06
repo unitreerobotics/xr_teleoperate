@@ -252,6 +252,14 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
   </a>
 </p>
 
+## 1.5 📡 Onboard / cable-free deployment
+
+To operate without an Ethernet cable to the host, teleoperation must run **on the robot's own
+computer** — the robot publishes DDS only on its internal wired network, so a laptop on Wi-Fi
+cannot discover it. Setup, the environment it needs, the threading fix that keeps the control loop
+at 30 Hz, and a troubleshooting table are in
+[Onboard deployment document](OnboardDeployment.md).
+
 # 2. 💻 Simulation Deployment
 
 ## 2.1 📥 Environment Setup
