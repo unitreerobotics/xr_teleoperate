@@ -36,6 +36,51 @@ STOP           = False  # Enable to begin system exit procedure
 READY          = False  # Ready to (1) enter START state, (2) enter RECORD_RUNNING state
 RECORD_RUNNING = False  # True if [Recording]
 RECORD_TOGGLE  = False  # Toggle recording state
+RESET_ALL_REQUESTED = False
+_XR_BUTTON_PREV = {
+    "left_a": False,
+    "left_b": False,
+    "right_a": False,
+    "right_b": False,
+}
+
+MOTION_STICK_DEADZONE = 0.04
+
+
+def shape_motion_axis(value):
+    """Rescale a scalar stick axis after a small hardware-drift dead-zone."""
+    value = float(value)
+    magnitude = abs(value)
+    if magnitude <= MOTION_STICK_DEADZONE:
+        return 0.0
+    normalized = (magnitude - MOTION_STICK_DEADZONE) / (1.0 - MOTION_STICK_DEADZONE)
+    return normalized if value > 0.0 else -normalized
+
+
+def shape_motion_stick(x, y):
+    """Apply a circular dead-zone so diagonal motion keeps its true direction."""
+    x, y = float(x), float(y)
+    magnitude = min((x * x + y * y) ** 0.5, 1.0)
+    if magnitude <= MOTION_STICK_DEADZONE:
+        return 0.0, 0.0
+    output_magnitude = (magnitude - MOTION_STICK_DEADZONE) / (1.0 - MOTION_STICK_DEADZONE)
+    scale = output_magnitude / magnitude
+    return x * scale, y * scale
+
+
+def anti_deadzone_velocity(value, minimum, maximum):
+    """Map active input directly into the locomotion policy's stable range."""
+    value = float(value)
+    if value == 0.0:
+        return 0.0
+    magnitude = minimum + (maximum - minimum) * min(abs(value), 1.0)
+    return magnitude if value > 0.0 else -magnitude
+
+
+def slew_motion(current, target, max_delta):
+    """Limit command acceleration without delaying a requested stop excessively."""
+    delta = target - current
+    return current + min(max(delta, -max_delta), max_delta)
 #  -------        ---------                -----------                -----------            ---------
 #   state          [Ready]      ==>        [Recording]     ==>         [AutoSave]     -->     [Ready]
 #  -------        ---------      |         -----------      |         -----------      |     ---------
@@ -49,7 +94,7 @@ RECORD_TOGGLE  = False  # Toggle recording state
 #  --> auto  : Auto-transition after saving data.
 
 def on_press(key):
-    global STOP, START, RECORD_TOGGLE
+    global STOP, START, RECORD_TOGGLE, RESET_ALL_REQUESTED
     if key == 'r':
         START = True
     elif key == 'q':
@@ -57,8 +102,36 @@ def on_press(key):
         STOP = True
     elif key == 's' and START == True:
         RECORD_TOGGLE = True
+    elif key == 't':
+        RESET_ALL_REQUESTED = True
     else:
         logger_mp.warning(f"[on_press] {key} was pressed, but no action is defined for this key.")
+
+def process_xr_buttons(tele_data):
+    """Map Quest buttons to keyboard commands, firing once per press."""
+    button_state = {
+        # Vuer exposes Quest X/Y as the left controller's generic A/B fields.
+        "left_a": bool(tele_data.left_ctrl_aButton),   # X -> r
+        "left_b": bool(tele_data.left_ctrl_bButton),   # Y -> s
+        "right_a": bool(tele_data.right_ctrl_aButton), # A -> reset all
+        "right_b": bool(tele_data.right_ctrl_bButton), # B -> q
+    }
+    mapping = {"left_a": "r", "left_b": "s", "right_a": "t", "right_b": "q"}
+    for name, pressed in button_state.items():
+        if pressed and not _XR_BUTTON_PREV[name]:
+            key = mapping[name]
+            logger_mp.info(f"[Quest controller] {name} -> [{key}]")
+            on_press(key)
+        _XR_BUTTON_PREV[name] = pressed
+
+
+def consume_reset_all_request():
+    """Consume the edge-triggered Quest reset request exactly once."""
+    global RESET_ALL_REQUESTED
+    if not RESET_ALL_REQUESTED:
+        return False
+    RESET_ALL_REQUESTED = False
+    return True
 
 def get_state() -> dict:
     """Return current heartbeat state"""
@@ -142,7 +215,12 @@ if __name__ == '__main__':
         # motion mode (G1: Regular mode R1+X, not Running mode R2+A)
         if args.motion:
             if args.input_mode == "controller":
-                loco_wrapper = LocoClientWrapper()
+                if args.sim:
+                    run_command_publisher = ChannelPublisher("rt/run_command/cmd", String_)
+                    run_command_publisher.Init()
+                    logger_mp.info("[Motion] Isaac run-command DDS publisher initialized.")
+                else:
+                    loco_wrapper = LocoClientWrapper()
         else:
             motion_switcher = MotionSwitcher()
             status, result = motion_switcher.Enter_Debug_Mode()
@@ -274,10 +352,16 @@ if __name__ == '__main__':
         else:
             logger_mp.info("🔵  Recording is DISABLED (run with --record to enable).")
         logger_mp.info("🔴  Press [q] to stop and exit the program.")
+        if args.input_mode == "controller":
+            logger_mp.info("🎮  Quest: [X]=start, [Y]=record, [A]=reset all, [B]=quit; left stick=move, right stick=body yaw.")
         logger_mp.info("⚠️  IMPORTANT: Please keep your distance and stay safe.")
         READY = True                  # now ready to (1) enter START state
         while not START and not STOP: # wait for start or stop signal.
             time.sleep(0.033)
+            if args.input_mode == "controller":
+                process_xr_buttons(tv_wrapper.get_tele_data())
+                if args.sim and consume_reset_all_request():
+                    publish_reset_category(2, reset_pose_publisher)
             if camera_config['head_camera']['enable_zmq'] and xr_need_local_img:
                 head_img = img_client.get_head_frame()
                 if head_img.bgr is not None:
@@ -289,6 +373,8 @@ if __name__ == '__main__':
         head_img = None
         left_wrist_img = None
         right_wrist_img = None
+        filtered_motion = [0.0, 0.0, 0.0]
+        last_motion_debug_time = 0.0
 
         # main loop. robot start to follow VR user's motion
         while not STOP:
@@ -322,6 +408,11 @@ if __name__ == '__main__':
 
             # get xr's tele data
             tele_data = tv_wrapper.get_tele_data()
+            if args.input_mode == "controller":
+                process_xr_buttons(tele_data)
+                if args.sim and consume_reset_all_request():
+                    filtered_motion[:] = [0.0, 0.0, 0.0]
+                    publish_reset_category(2, reset_pose_publisher)
             if args.ee in ("dex3", "inspire_ftp", "inspire_dfx", "brainco")  and args.input_mode == "hand":
                 with left_hand_pos_array.get_lock():
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
@@ -352,18 +443,59 @@ if __name__ == '__main__':
                 xr_motion_data_ready.value = tele_data.motion_data_ready
             
             # high level control
+            body_yaw = 0.0
             if args.input_mode == "controller" and args.motion:
-                # quit teleoperate
-                if tele_data.right_ctrl_aButton:
-                    START = False
-                    STOP = True
+                left_x, left_y = shape_motion_stick(
+                    tele_data.left_ctrl_thumbstickValue[0],
+                    tele_data.left_ctrl_thumbstickValue[1],
+                )
+                target_vx = -anti_deadzone_velocity(left_y, 0.28, 0.80)
+                target_vy = -anti_deadzone_velocity(left_x, 0.22, 0.50)
+                right_x = shape_motion_axis(tele_data.right_ctrl_thumbstickValue[0])
+                target_yaw = -anti_deadzone_velocity(right_x, 0.40, 1.50)
+                # At the 30 Hz teleop rate these limits give a controlled ramp
+                # instead of instantly switching the gait policy's commands.
+                filtered_motion[0] = slew_motion(filtered_motion[0], target_vx, 0.15)
+                filtered_motion[1] = slew_motion(filtered_motion[1], target_vy, 0.15)
+                filtered_motion[2] = slew_motion(filtered_motion[2], target_yaw, 0.30)
+                vx, vy, body_yaw = filtered_motion
+                if (
+                    abs(tele_data.right_ctrl_thumbstickValue[0]) > MOTION_STICK_DEADZONE
+                    or (left_x * left_x + left_y * left_y) > 0.0
+                ):
+                    now = time.monotonic()
+                    if now - last_motion_debug_time >= 0.5:
+                        logger_mp.info(
+                            "[Motion] left=(%.3f, %.3f) -> velocity=(%.3f, %.3f); right x=%.3f -> yaw=%.3f",
+                            tele_data.left_ctrl_thumbstickValue[0],
+                            tele_data.left_ctrl_thumbstickValue[1],
+                            vx, vy,
+                            tele_data.right_ctrl_thumbstickValue[0], body_yaw,
+                        )
+                        last_motion_debug_time = now
+                # Right stick now controls only whole-body yaw. Keep the waist
+                # centered so locomotion and upper-body teleop do not fight.
+                if hasattr(arm_ctrl, "set_waist_yaw_input"):
+                    arm_ctrl.set_waist_yaw_input(0.0)
                 # command robot to enter damping mode. soft emergency stop function
-                if tele_data.left_ctrl_thumbstick and tele_data.right_ctrl_thumbstick:
-                    loco_wrapper.Damp()
-                # https://github.com/unitreerobotics/xr_teleoperate/issues/135, control, limit velocity to within 0.3
-                loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
-                                  -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
-                                  -tele_data.right_ctrl_thumbstickValue[0]* 0.3)
+                emergency_stop = tele_data.left_ctrl_thumbstick and tele_data.right_ctrl_thumbstick
+                # Left stick translates; right stick directly rotates the body.
+                if args.sim:
+                    if emergency_stop:
+                        vx, vy, body_yaw = 0.0, 0.0, 0.0
+                    run_command_publisher.Write(String_(data=str([vx, vy, body_yaw, 0.8])))
+                else:
+                    if emergency_stop:
+                        loco_wrapper.Enter_Damp_Mode()
+                    else:
+                        loco_wrapper.Move(vx, vy, body_yaw)
+            elif args.input_mode == "controller":
+                # Stable fixed-base mode: legs/root remain locked and the
+                # right stick directly selects a smooth waist-yaw position.
+                # The left stick is intentionally ignored in this mode.
+                right_x = shape_motion_axis(tele_data.right_ctrl_thumbstickValue[0])
+                if hasattr(arm_ctrl, "set_waist_yaw_input"):
+                    arm_ctrl.set_waist_yaw_input(right_x)
 
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
@@ -405,7 +537,7 @@ if __name__ == '__main__':
                         current_body_state = arm_ctrl.get_current_motor_q().tolist()
                         current_body_action = [-tele_data.left_ctrl_thumbstickValue[1]  * 0.3,
                                                -tele_data.left_ctrl_thumbstickValue[0]  * 0.3,
-                                               -tele_data.right_ctrl_thumbstickValue[0] * 0.3]
+                                               body_yaw]
                 elif (args.ee == "inspire_dfx" or args.ee == "inspire_ftp" or args.ee == "brainco") and args.input_mode == "hand":
                     with dual_hand_data_lock:
                         left_ee_state = dual_hand_state_array[:6]
@@ -423,7 +555,7 @@ if __name__ == '__main__':
                         current_body_state = arm_ctrl.get_current_motor_q().tolist()
                         current_body_action = [-tele_data.left_ctrl_thumbstickValue[1]  * 0.3,
                                                -tele_data.left_ctrl_thumbstickValue[0]  * 0.3,
-                                               -tele_data.right_ctrl_thumbstickValue[0] * 0.3]
+                                               body_yaw]
                 else:
                     left_ee_state = []
                     right_ee_state = []

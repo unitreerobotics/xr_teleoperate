@@ -93,12 +93,22 @@ class G1_29_ArmController:
         self.all_motor_q = None
         self.arm_velocity_limit = 20.0
         self.control_dt = 1.0 / 250.0
+        # Fixed-base teleoperation uses the waist to reach the Ridgeback on
+        # either side.  Stay comfortably inside G1's mechanical joint limit
+        # while allowing substantially more torso rotation than before.
+        self.waist_yaw_limit = 2.00
+        self.waist_yaw_velocity_limit = 1.25
+        self.waist_yaw_input_rate = 1.8
+        self.waist_yaw_target = 0.0
+        self._waist_yaw_command = 0.0
 
         self._speed_gradual_max = False
         self._gradual_start_time = None
         self._gradual_time = None
 
-        if self.motion_mode:
+        # Isaac Sim listens on rt/lowcmd; rt/arm_sdk is the real robot's
+        # motion-mode upper-body channel.
+        if self.motion_mode and not self.simulation_mode:
             self.lowcmd_publisher = ChannelPublisher(kTopicLowCommand_Motion, hg_LowCmd)
         else:
             self.lowcmd_publisher = ChannelPublisher(kTopicLowCommand_Debug, hg_LowCmd)
@@ -122,6 +132,8 @@ class G1_29_ArmController:
         self.msg.mode_machine = self.get_mode_machine()
 
         self.all_motor_q = self.get_current_motor_q()
+        self.waist_yaw_target = float(self.all_motor_q[G1_29_JointIndex.kWaistYaw])
+        self._waist_yaw_command = self.waist_yaw_target
         logger_mp.debug(f"Current all body motor state q:\n{self.all_motor_q} \n")
         logger_mp.debug(f"Current two arms motor state q:\n{self.get_current_dual_arm_q()}\n")
         logger_mp.info("Lock all joints except two arms...")
@@ -194,6 +206,18 @@ class G1_29_ArmController:
                 self.msg.motor_cmd[id].dq = 0
                 self.msg.motor_cmd[id].tau = arm_tauff_target[idx]   
 
+            # Smooth, position-based Quest right-stick control for waist yaw.
+            waist_delta = np.clip(
+                self.waist_yaw_target - self._waist_yaw_command,
+                -self.waist_yaw_velocity_limit * self.control_dt,
+                self.waist_yaw_velocity_limit * self.control_dt,
+            )
+            self._waist_yaw_command += waist_delta
+            waist_cmd = self.msg.motor_cmd[G1_29_JointIndex.kWaistYaw]
+            waist_cmd.q = self._waist_yaw_command
+            waist_cmd.dq = 0.0
+            waist_cmd.tau = 0.0
+
             self.msg.crc = self.crc.Crc(self.msg)
             self.lowcmd_publisher.Write(self.msg)
 
@@ -213,6 +237,21 @@ class G1_29_ArmController:
         with self.ctrl_lock:
             self.q_target = q_target
             self.tauff_target = tauff_target
+
+    def set_waist_yaw_input(self, axis_x):
+        """Integrate Quest right-stick input and hold angle when released."""
+        axis_x = float(axis_x)
+        if abs(axis_x) < 0.04:
+            return
+        self.waist_yaw_target = float(np.clip(
+            self.waist_yaw_target - axis_x * self.waist_yaw_input_rate / 30.0,
+            -self.waist_yaw_limit,
+            self.waist_yaw_limit,
+        ))
+
+    def get_waist_yaw_command(self):
+        """Return the smoothed waist command used by hierarchical body turning."""
+        return float(self._waist_yaw_command)
 
     def get_mode_machine(self):
         '''Return current dds mode machine.'''
