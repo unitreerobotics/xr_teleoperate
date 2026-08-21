@@ -60,6 +60,35 @@ def on_press(key):
     else:
         logger_mp.warning(f"[on_press] {key} was pressed, but no action is defined for this key.")
 
+# Quest 3 controller state-machine bindings (edge-detected). Only meaningful when
+# `tele_data.right_ctrl_*`/`left_ctrl_*` are actually populated by televuer, which today
+# requires `--input-mode controller`. In `--input-mode hand`, these fields default to False
+# forever, so this poll is a harmless no-op unless/until televuer is patched to also expose
+# controller buttons while hand-tracking is active.
+# Mapping: right A = quit, right B = start/ready, left X = record toggle (left Y reserved).
+# Only ever read/written from the main thread (wait loop + main loop), unlike the keyboard-
+# listener/IPC-server threads that mutate START/STOP/RECORD_TOGGLE, so no lock is needed here.
+_QUEST_PREV_BUTTONS = {"quit": False, "start": False, "record": False}
+
+def poll_quest_controller_buttons(tele_data):
+    """Edge-detect Quest 3 controller face buttons and funnel rising edges into on_press()."""
+    global _QUEST_PREV_BUTTONS
+    current = {
+        "quit":   bool(tele_data.right_ctrl_aButton),
+        "start":  bool(tele_data.right_ctrl_bButton),
+        "record": bool(tele_data.left_ctrl_aButton),
+    }
+    if current["quit"] and not _QUEST_PREV_BUTTONS["quit"]:
+        logger_mp.info("[quest_ctrl] right A pressed -> quit")
+        on_press('q')
+    if current["start"] and not _QUEST_PREV_BUTTONS["start"]:
+        logger_mp.info("[quest_ctrl] right B pressed -> start/ready")
+        on_press('r')
+    if current["record"] and not _QUEST_PREV_BUTTONS["record"]:
+        logger_mp.info("[quest_ctrl] left X pressed -> record toggle")
+        on_press('s')
+    _QUEST_PREV_BUTTONS = current
+
 def get_state() -> dict:
     """Return current heartbeat state"""
     global START, STOP, RECORD_RUNNING, READY
@@ -276,6 +305,10 @@ if __name__ == '__main__':
                 head_img = img_client.get_head_frame()
                 if head_img.bgr is not None:
                     tv_wrapper.render_to_xr(head_img.bgr)
+            try:
+                poll_quest_controller_buttons(tv_wrapper.get_tele_data())
+            except Exception as e:
+                logger_mp.debug(f"[quest_ctrl] poll failed in wait loop: {e}")
 
         logger_mp.info("---------------------🚀start Tracking🚀-------------------------")
 
@@ -343,7 +376,14 @@ if __name__ == '__main__':
                 pass
             with xr_motion_data_ready.get_lock():
                 xr_motion_data_ready.value = tele_data.motion_data_ready
-            
+
+            # Quest 3 controller state-machine bindings (READY/Recording/Quit); see
+            # poll_quest_controller_buttons() docstring for the hand-vs-controller-mode caveat.
+            try:
+                poll_quest_controller_buttons(tele_data)
+            except Exception as e:
+                logger_mp.debug(f"[quest_ctrl] poll failed in main loop: {e}")
+
             # high level control
             if args.input_mode == "controller" and args.motion:
                 # quit teleoperate

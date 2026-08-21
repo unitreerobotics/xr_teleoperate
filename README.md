@@ -237,7 +237,7 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 | `--headless` | **Enable headless mode** For running the program on devices without a display, e.g., the Development Computing Unit (PC2). |
 |   `--sim`    | **Enable [simulation mode](https://github.com/unitreerobotics/unitree_sim_isaaclab)** |
 |   `--ipc`    | **Inter-process communication mode** Allows controlling the xr_teleoperate program’s state via IPC. Suitable for interaction with agent programs. |
-|  `--record`  | **Enable data recording mode** Press **r** to start teleoperation, then **s** to start recording; press **s** again to stop and save the episode. Press **s** repeatedly to repeat the process. |
+|  `--record`  | **Enable data recording mode** Press **r** to start teleoperation, then **s** to start recording; press **s** again to stop and save the episode. Press **s** repeatedly to repeat the process. Quest 3 controller buttons can do the same — see 1.4. |
 | `--task-dir` | Path to save recorded data. Default: `./utils/data/` |
 | `--task-name` | Task file name for recording. Default: `pick cube` |
 | `--task-goal` | Task goal recorded in the json file. Default: `pick up cube.` |
@@ -251,6 +251,29 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
     <img src="https://oss-global-cdn.unitree.com/static/712c312b0ac3401f8d7d9001b1e14645_11655x4305.jpg" alt="System Diagram" style="width: 85%;">
   </a>
 </p>
+
+The keyboard keys **r** / **s** / **q** shown in the diagram above drive
+`START` / `RECORD_TOGGLE` / `STOP` via `on_press()` in `teleop_hand_and_arm.py`. Quest 3
+controller face buttons are wired into the same `on_press()` funnel, so they trigger the exact
+same transitions:
+
+|      Action      |   Button   | Equivalent keyboard key |
+| :---------------: | :--------: | :----------------------: |
+| Start tracking (READY → active) | Right **B** | `r` |
+| Toggle recording (only with `--record`) | Left **X** | `s` |
+| Quit | Right **A** | `q` |
+
+This supersedes the older "Right controller **A** = Exit teleop" note in section 3 below, which
+only applied in `--motion` + `--input-mode controller`: quit-on-right-A now works in **every**
+session, motion mode or not.
+
+**Mode caveat:** on stock upstream `televuer`, controller button state is only readable when
+`--input-mode controller` — in `--input-mode hand`, `televuer` never listens for controller
+button events at all, so these bindings silently do nothing. This fork's `televuer` submodule is
+patched (see its own README/commit history) to keep listening for controller buttons even while
+hand tracking drives wrist pose, so the table above applies in both `--input-mode hand` and
+`--input-mode controller`. If you're on a plain upstream `televuer` checkout, expect these
+bindings to work only in `--input-mode controller`.
 
 # 2. 💻 Simulation Deployment
 
@@ -470,7 +493,7 @@ For a G1-29 equipped with internally wired Dex1 grippers, use `--arm G1_29 --ee 
 >  2. Please make sure to read the [Official Documentation](https://support.unitree.com/home/zh/Teleoperation) at least once before running this program.
 >  3. To use motion mode (with `--motion`), ensure the robot is in control mode (via [R3 remote](https://www.unitree.com/R3)).
 >  5. In motion mode:
->    - Right controller **A** = Exit teleop
+>    - Right controller **A** = Exit teleop (see the general Quest-button table in 1.4 — this applies outside motion mode too)
 >    - Both joysticks pressed = soft emergency stop (switch to damping mode)
 >    - Left joystick = drive directions; 
 >    - right joystick = turning; 
