@@ -1,6 +1,6 @@
 [submodule "teleop/televuer"]
 	path = teleop/televuer
-	url = https://github.com/unitreerobotics/televuer
+	url = https://github.com/MoissanClub/televuer
 [submodule "teleop/robot_control/dex-retargeting"]
 	path = teleop/robot_control/dex-retargeting
 	url = https://github.com/silencht/dex-retargeting
