@@ -354,9 +354,13 @@ if __name__ == '__main__':
                 if tele_data.left_ctrl_thumbstick and tele_data.right_ctrl_thumbstick:
                     loco_wrapper.Damp()
                 # https://github.com/unitreerobotics/xr_teleoperate/issues/135, control, limit velocity to within 0.3
-                loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
-                                  -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
-                                  -tele_data.right_ctrl_thumbstickValue[0]* 0.3)
+                # Clamp controller thumbstick axes to [-1, 1] before scaling: XR controllers
+                # report thumbstick axes in this range, and any value outside it is invalid
+                # input that must not reach locomotion control unscaled.
+                loco_vx = max(-1.0, min(1.0, -tele_data.left_ctrl_thumbstickValue[1])) * 0.3
+                loco_vy = max(-1.0, min(1.0, -tele_data.left_ctrl_thumbstickValue[0])) * 0.3
+                loco_wz = max(-1.0, min(1.0, -tele_data.right_ctrl_thumbstickValue[0])) * 0.3
+                loco_wrapper.Move(loco_vx, loco_vy, loco_wz)
 
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
