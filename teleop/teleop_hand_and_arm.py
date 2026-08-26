@@ -36,7 +36,7 @@ STOP           = False  # Enable to begin system exit procedure
 READY          = False  # Ready to (1) enter START state, (2) enter RECORD_RUNNING state
 RECORD_RUNNING = False  # True if [Recording]
 RECORD_TOGGLE  = False  # Toggle recording state
-RESET_ALL_REQUESTED = False
+RESET_CATEGORY_REQUESTED = None
 _XR_BUTTON_PREV = {
     "left_a": False,
     "left_b": False,
@@ -94,7 +94,7 @@ def slew_motion(current, target, max_delta):
 #  --> auto  : Auto-transition after saving data.
 
 def on_press(key):
-    global STOP, START, RECORD_TOGGLE, RESET_ALL_REQUESTED
+    global STOP, START, RECORD_TOGGLE
     if key == 'r':
         START = True
     elif key == 'q':
@@ -102,36 +102,35 @@ def on_press(key):
         STOP = True
     elif key == 's' and START == True:
         RECORD_TOGGLE = True
-    elif key == 't':
-        RESET_ALL_REQUESTED = True
     else:
         logger_mp.warning(f"[on_press] {key} was pressed, but no action is defined for this key.")
 
 def process_xr_buttons(tele_data):
-    """Map Quest buttons to keyboard commands, firing once per press."""
+    """Publish the reset categories defined by core_unitree_sim_isaaclab/main."""
+    global RESET_CATEGORY_REQUESTED
     button_state = {
         # Vuer exposes Quest X/Y as the left controller's generic A/B fields.
-        "left_a": bool(tele_data.left_ctrl_aButton),   # X -> r
-        "left_b": bool(tele_data.left_ctrl_bButton),   # Y -> s
-        "right_a": bool(tele_data.right_ctrl_aButton), # A -> reset all
-        "right_b": bool(tele_data.right_ctrl_bButton), # B -> q
+        "left_a": bool(tele_data.left_ctrl_aButton),    # X -> camera recording
+        "left_b": bool(tele_data.left_ctrl_bButton),    # Y -> fixed-table room reset
+        "right_a": bool(tele_data.right_ctrl_aButton),  # A -> Ridgeback arc
+        "right_b": bool(tele_data.right_ctrl_bButton),  # B -> full scene reset
     }
-    mapping = {"left_a": "r", "left_b": "s", "right_a": "t", "right_b": "q"}
+    categories = {"left_a": 5, "left_b": 3, "right_a": 4, "right_b": 2}
     for name, pressed in button_state.items():
         if pressed and not _XR_BUTTON_PREV[name]:
-            key = mapping[name]
-            logger_mp.info(f"[Quest controller] {name} -> [{key}]")
-            on_press(key)
+            RESET_CATEGORY_REQUESTED = categories[name]
+            logger_mp.info(
+                f"[Quest controller] {name} -> reset category {RESET_CATEGORY_REQUESTED}"
+            )
         _XR_BUTTON_PREV[name] = pressed
 
 
-def consume_reset_all_request():
-    """Consume the edge-triggered Quest reset request exactly once."""
-    global RESET_ALL_REQUESTED
-    if not RESET_ALL_REQUESTED:
-        return False
-    RESET_ALL_REQUESTED = False
-    return True
+def consume_reset_category_request():
+    """Consume one edge-triggered Quest reset request."""
+    global RESET_CATEGORY_REQUESTED
+    category = RESET_CATEGORY_REQUESTED
+    RESET_CATEGORY_REQUESTED = None
+    return category
 
 def get_state() -> dict:
     """Return current heartbeat state"""
@@ -353,15 +352,16 @@ if __name__ == '__main__':
             logger_mp.info("🔵  Recording is DISABLED (run with --record to enable).")
         logger_mp.info("🔴  Press [q] to stop and exit the program.")
         if args.input_mode == "controller":
-            logger_mp.info("🎮  Quest: [X]=start, [Y]=record, [A]=reset all, [B]=quit; left stick=move, right stick=body yaw.")
+            logger_mp.info("🎮  Quest: [X]=camera recording, [Y]=fixed-table room reset, [A]=Ridgeback arc, [B]=full scene reset.")
         logger_mp.info("⚠️  IMPORTANT: Please keep your distance and stay safe.")
         READY = True                  # now ready to (1) enter START state
         while not START and not STOP: # wait for start or stop signal.
             time.sleep(0.033)
             if args.input_mode == "controller":
                 process_xr_buttons(tv_wrapper.get_tele_data())
-                if args.sim and consume_reset_all_request():
-                    publish_reset_category(2, reset_pose_publisher)
+                reset_category = consume_reset_category_request()
+                if args.sim and reset_category is not None:
+                    publish_reset_category(reset_category, reset_pose_publisher)
             if camera_config['head_camera']['enable_zmq'] and xr_need_local_img:
                 head_img = img_client.get_head_frame()
                 if head_img.bgr is not None:
@@ -410,9 +410,11 @@ if __name__ == '__main__':
             tele_data = tv_wrapper.get_tele_data()
             if args.input_mode == "controller":
                 process_xr_buttons(tele_data)
-                if args.sim and consume_reset_all_request():
-                    filtered_motion[:] = [0.0, 0.0, 0.0]
-                    publish_reset_category(2, reset_pose_publisher)
+                reset_category = consume_reset_category_request()
+                if args.sim and reset_category is not None:
+                    if reset_category in (2, 3):
+                        filtered_motion[:] = [0.0, 0.0, 0.0]
+                    publish_reset_category(reset_category, reset_pose_publisher)
             if args.ee in ("dex3", "inspire_ftp", "inspire_dfx", "brainco")  and args.input_mode == "hand":
                 with left_hand_pos_array.get_lock():
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
