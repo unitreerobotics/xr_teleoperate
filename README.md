@@ -185,6 +185,18 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 (tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ source ~/.bashrc
 ```
 
+```bash
+# Install dex-retargeting submodule
+(tv) unitree@Host:~/xr_teleoperate/teleop/televuer$ cd ../robot_control/dex-retargeting/
+(tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ pip install -e .
+```
+
+```bash
+# Install this repository's remaining dependencies
+(tv) unitree@Host:~/xr_teleoperate/teleop/robot_control/dex-retargeting$ cd ../../../
+(tv) unitree@Host:~/xr_teleoperate$ pip install -r requirements.txt
+```
+
 
 
 ## 1.2 🕹️ unitree_sdk2_python
