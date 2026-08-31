@@ -259,9 +259,15 @@ same transitions:
 
 |      Action      |   Button   | Equivalent keyboard key |
 | :---------------: | :--------: | :----------------------: |
-| Start tracking (READY → active) | Right **B** | `r` |
+| Start tracking / return to Ready (toggle) | Right **B** | `r` |
 | Toggle recording (only with `--record`) | Left **X** | `s` |
 | Quit | Right **A** | `q` |
+
+**Right B / `r` is a toggle**, not a one-shot: press it once from Ready to start tracking, and
+press it again while tracking to return to Ready **without exiting the program** — the arm goes
+home (same call quitting uses) and the wait-for-`r`/`s`/`q` prompt reappears, ready to start
+tracking again. If a recording is currently running, the return-to-Ready press is ignored (with a
+logged warning) — stop/save the recording first.
 
 This supersedes the older "Right controller **A** = Exit teleop" note in section 3 below, which
 only applied in `--motion` + `--input-mode controller`: quit-on-right-A now works in **every**
