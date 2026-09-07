@@ -533,7 +533,7 @@
     <parent link="torso_link"/>
     <child link="left_shoulder_pitch_link"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-2.618" upper="1.833" effort="130" velocity="21.9"/>
+    <limit lower="-2.618" upper="1.20" effort="130" velocity="21.9"/>
   </joint>
   <link name="left_shoulder_roll_link">
     <inertial>
@@ -560,7 +560,7 @@
     <parent link="left_shoulder_pitch_link"/>
     <child link="left_shoulder_roll_link"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.517" upper="2.494" effort="60" velocity="18.7"/>
+    <limit lower="-0.517" upper="1.80" effort="60" velocity="18.7"/>
   </joint>
   <link name="left_shoulder_yaw_link">
     <inertial>
@@ -587,7 +587,7 @@
     <parent link="left_shoulder_roll_link"/>
     <child link="left_shoulder_yaw_link"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-2.618" upper="2.618" effort="60" velocity="18.7"/>
+    <limit lower="-1.57" upper="1.57" effort="60" velocity="18.7"/>
   </joint>
   <link name="left_elbow_link">
     <inertial>
@@ -614,7 +614,7 @@
     <parent link="left_shoulder_yaw_link"/>
     <child link="left_elbow_link"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.986" upper="3.071" effort="60" velocity="18.7"/>
+    <limit lower="-0.986" upper="1.60" effort="60" velocity="18.7"/>
   </joint>
   <link name="left_wrist_roll_link">
     <inertial>
@@ -641,7 +641,7 @@
     <parent link="left_elbow_link"/>
     <child link="left_wrist_roll_link"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-2.618" upper="2.618" effort="60" velocity="18.7"/>
+    <limit lower="-1.65" upper="1.65" effort="60" velocity="18.7"/>
   </joint>
   <link name="left_wrist_pitch_link">
     <inertial>
@@ -722,7 +722,7 @@
     <parent link="torso_link"/>
     <child link="right_shoulder_pitch_link"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-2.618" upper="1.833" effort="130" velocity="21.9"/>
+    <limit lower="-2.618" upper="1.20" effort="130" velocity="21.9"/>
   </joint>
   <link name="right_shoulder_roll_link">
     <inertial>
@@ -749,7 +749,7 @@
     <parent link="right_shoulder_pitch_link"/>
     <child link="right_shoulder_roll_link"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-2.494" upper="0.517" effort="60" velocity="18.7"/>
+    <limit lower="-1.80" upper="0.517" effort="60" velocity="18.7"/>
   </joint>
   <link name="right_shoulder_yaw_link">
     <inertial>
@@ -776,7 +776,7 @@
     <parent link="right_shoulder_roll_link"/>
     <child link="right_shoulder_yaw_link"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-2.618" upper="2.618" effort="60" velocity="18.7"/>
+    <limit lower="-1.57" upper="1.57" effort="60" velocity="18.7"/>
   </joint>
   <link name="right_elbow_link">
     <inertial>
@@ -803,7 +803,7 @@
     <parent link="right_shoulder_yaw_link"/>
     <child link="right_elbow_link"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.986" upper="3.071" effort="60" velocity="18.7"/>
+    <limit lower="-0.986" upper="1.60" effort="60" velocity="18.7"/>
   </joint>
   <link name="right_wrist_roll_link">
     <inertial>
@@ -830,7 +830,7 @@
     <parent link="right_elbow_link"/>
     <child link="right_wrist_roll_link"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-2.618" upper="2.618" effort="60" velocity="18.7"/>
+    <limit lower="-1.65" upper="1.65" effort="60" velocity="18.7"/>
   </joint>
   <link name="right_wrist_pitch_link">
     <inertial>

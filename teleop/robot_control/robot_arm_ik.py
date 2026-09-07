@@ -1324,7 +1324,7 @@ class H2_ArmIK:
                 self.reduced_robot.model.upperPositionLimit,
             )
         )
-        self.opti.minimize(50 * self.translational_cost + 0.8 * self.rotation_cost + 0.02 * self.regularization_cost + 0.1 * self.smooth_cost)
+        self.opti.minimize(50 * self.translational_cost + 0.8 * self.rotation_cost + 0.01 * self.regularization_cost + 0.1 * self.smooth_cost)
 
         opts = {
             # CasADi-level options
