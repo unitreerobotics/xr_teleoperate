@@ -29,6 +29,7 @@ kTopicDex3LeftCommand = "rt/dex3/left/cmd"
 kTopicDex3RightCommand = "rt/dex3/right/cmd"
 kTopicDex3LeftState = "rt/dex3/left/state"
 kTopicDex3RightState = "rt/dex3/right/state"
+Dex3_State_Timeout = 10.0  # seconds to wait for hand state before running with the hands that answered
 
 
 class Dex3_1_Controller:
@@ -69,25 +70,28 @@ class Dex3_1_Controller:
         self.RightHandCmb_publisher = ChannelPublisher(kTopicDex3RightCommand, HandCmd_)
         self.RightHandCmb_publisher.Init()
 
-        self.LeftHandState_subscriber = ChannelSubscriber(kTopicDex3LeftState, HandState_)
-        self.LeftHandState_subscriber.Init()
-        self.RightHandState_subscriber = ChannelSubscriber(kTopicDex3RightState, HandState_)
-        self.RightHandState_subscriber.Init()
-
         # Shared Arrays for hand states
-        self.left_hand_state_array  = Array('d', Dex3_Num_Motors, lock=True)  
+        self.left_hand_state_array  = Array('d', Dex3_Num_Motors, lock=True)
         self.right_hand_state_array = Array('d', Dex3_Num_Motors, lock=True)
 
-        # initialize subscribe thread
-        self.subscribe_state_thread = threading.Thread(target=self._subscribe_hand_state)
-        self.subscribe_state_thread.daemon = True
-        self.subscribe_state_thread.start()
+        # Callbacks rather than a Read() loop on both hands: a missing hand must not block the other one.
+        self.left_hand_present = Value('b', False)
+        self.right_hand_present = Value('b', False)
+        self.LeftHandState_subscriber = ChannelSubscriber(kTopicDex3LeftState, HandState_)
+        self.LeftHandState_subscriber.Init(self._hand_state_handler(Dex3_1_Left_JointIndex, self.left_hand_state_array, self.left_hand_present), 10)
+        self.RightHandState_subscriber = ChannelSubscriber(kTopicDex3RightState, HandState_)
+        self.RightHandState_subscriber.Init(self._hand_state_handler(Dex3_1_Right_JointIndex, self.right_hand_state_array, self.right_hand_present), 10)
 
-        while True:
-            if any(self.left_hand_state_array) and any(self.right_hand_state_array):
-                break
+        start = time.time()
+        while not (self.left_hand_present.value and self.right_hand_present.value) and time.time() - start < Dex3_State_Timeout:
             time.sleep(0.01)
             logger_mp.warning("[Dex3_1_Controller] Waiting to subscribe dds...")
+        if not (self.left_hand_present.value or self.right_hand_present.value):
+            raise RuntimeError(f"[Dex3_1_Controller] No state on {kTopicDex3LeftState} or {kTopicDex3RightState} after {Dex3_State_Timeout:.0f} s.")
+        if not self.left_hand_present.value:
+            logger_mp.warning("[Dex3_1_Controller] No state from the left hand; controlling the right hand only.")
+        if not self.right_hand_present.value:
+            logger_mp.warning("[Dex3_1_Controller] No state from the right hand; controlling the left hand only.")
         logger_mp.info("[Dex3_1_Controller] Subscribe dds ok.")
 
         hand_control_process = Process(target=self.control_process, args=(left_hand_array_in, right_hand_array_in,  self.left_hand_state_array, self.right_hand_state_array,
@@ -97,19 +101,14 @@ class Dex3_1_Controller:
 
         logger_mp.info("Initialize Dex3_1_Controller OK!")
 
-    def _subscribe_hand_state(self):
-        while True:
-            left_hand_msg  = self.LeftHandState_subscriber.Read()
-            right_hand_msg = self.RightHandState_subscriber.Read()
-            if left_hand_msg is not None and right_hand_msg is not None:
-                # Update left hand state
-                for idx, id in enumerate(Dex3_1_Left_JointIndex):
-                    self.left_hand_state_array[idx] = left_hand_msg.motor_state[id].q
-                # Update right hand state
-                for idx, id in enumerate(Dex3_1_Right_JointIndex):
-                    self.right_hand_state_array[idx] = right_hand_msg.motor_state[id].q
-            time.sleep(0.002)
-    
+    @staticmethod
+    def _hand_state_handler(joint_index, state_array, present):
+        def handler(msg):
+            for idx, id in enumerate(joint_index):
+                state_array[idx] = msg.motor_state[id].q
+            present.value = True
+        return handler
+
     class _RIS_Mode:
         def __init__(self, id=0, status=0x01, timeout=0):
             self.motor_mode = 0
@@ -130,8 +129,10 @@ class Dex3_1_Controller:
         for idx, id in enumerate(Dex3_1_Right_JointIndex):
             self.right_msg.motor_cmd[id].q = right_q_target[idx]
 
-        self.LeftHandCmb_publisher.Write(self.left_msg)
-        self.RightHandCmb_publisher.Write(self.right_msg)
+        if self.left_hand_present.value:
+            self.LeftHandCmb_publisher.Write(self.left_msg)
+        if self.right_hand_present.value:
+            self.RightHandCmb_publisher.Write(self.right_msg)
         # logger_mp.debug("hand ctrl publish ok.")
     
     def control_process(self, left_hand_array_in, right_hand_array_in, left_hand_state_array, right_hand_state_array,
