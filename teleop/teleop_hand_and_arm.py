@@ -268,6 +268,8 @@ if __name__ == '__main__':
         else:
             logger_mp.info("🔵  Recording is DISABLED (run with --record to enable).")
         logger_mp.info("🔴  Press [q] to stop and exit the program.")
+        if args.input_mode == "controller" and args.motion:
+            logger_mp.warning("⚠️  During tracking, press both controller thumbsticks down simultaneously to request damping mode (soft emergency stop). Use only when necessary.")
         logger_mp.info("⚠️  IMPORTANT: Please keep your distance and stay safe.")
         READY = True                  # now ready to (1) enter START state
         while not START and not STOP: # wait for start or stop signal.
@@ -352,7 +354,7 @@ if __name__ == '__main__':
                     STOP = True
                 # command robot to enter damping mode. soft emergency stop function
                 if tele_data.left_ctrl_thumbstick and tele_data.right_ctrl_thumbstick:
-                    loco_wrapper.Damp()
+                    loco_wrapper.Enter_Damp_Mode()
                 # https://github.com/unitreerobotics/xr_teleoperate/issues/135, control, limit velocity to within 0.3
                 loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
                                   -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
