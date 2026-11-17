@@ -142,9 +142,13 @@ For more information, you can refer to [Official Documentation ](https://support
 
 ```bash
 # Install teleimager submodule
+# Teleimager 2.x needs the system library libjpeg-turbo (used by PyTurboJPEG); install it first
 (tv) unitree@Host:~/xr_teleoperate$ cd teleop/teleimager
-(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ pip install -e . --no-deps
+(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ conda install -c conda-forge libjpeg-turbo
+(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ pip install -e .
 ```
+
+> **Note:** This repository is adapted to **teleimager v2.0.8** (the `teleop/teleimager` submodule is pinned to it). Do not upgrade to 2.1.x — it renamed `zmq_port` to `color_port` and is not compatible with this code. Use v2.0.8 on PC2 as well.
 
 ```bash
 # Install televuer submodule
@@ -300,7 +304,7 @@ Next steps:
 
 2. Connect to the corresponding Wi‑Fi
 
-3. Only proceed if your head camera has WebRTC enabled (`cam_config_server.yaml → head_camera → enable_webrtc: true`); otherwise jump to Step 4. Open a browser (e.g. Safari or PICO Browser) and go to:  
+3. Only proceed if your head camera has WebRTC enabled (`~/.config/teleimager/teleimager_server.yaml → camera → head_camera → enable_webrtc: true`); otherwise jump to Step 4. Open a browser (e.g. Safari or PICO Browser) and go to:  
    **https://192.168.123.164:60001**
 
    > **Note 1:** This IP is the address of **PC2**—the machine running teleimager service.  
@@ -381,9 +385,9 @@ In the simulation environment, the image service is automatically enabled. For p
    # SSH into PC2 and download the image service repository
    
    (base) unitree@PC2:~$ cd ~
-   (base) unitree@PC2:~$ git clone https://github.com/silencht/teleimager
+   (base) unitree@PC2:~$ git clone https://github.com/unitreerobotics/teleimager
    
-   # Configure the environment according to the instructions in the teleimager repository README: https://github.com/silencht/teleimager/blob/main/README.md
+   # Configure the environment according to the instructions in the teleimager repository README: https://github.com/unitreerobotics/teleimager/blob/main/README.md
    ```
 
 2. On the **local host**, execute the following commands:
@@ -396,24 +400,22 @@ In the simulation environment, the image service is automatically enabled. For p
    
    # On PC2, configure the certificate path according to the teleimager repository README, for example:
    (teleimager) unitree@PC2:~$ cd teleimager
-   (teleimager) unitree@PC2:~$ mkdir -p ~/.config/xr_teleoperate/
-   (teleimager) unitree@PC2:~/teleimager$ cp cert.pem key.pem ~/.config/xr_teleoperate/
+   (teleimager) unitree@PC2:~$ mkdir -p ~/.config/teleimager/
+   (teleimager) unitree@PC2:~/teleimager$ cp cert.pem key.pem ~/.config/teleimager/
    ```
 
-3. On the **development computing unit PC2**, configure `cam_config_server.yaml` according to the teleimager documentation and start the image service.
+3. On the **development computing unit PC2**, configure `teleimager_server.yaml` according to the teleimager documentation (created automatically under `~/.config/teleimager/` on first run) and start the image service.
 
    ```bash
-   (teleimager) unitree@PC2:~/image_server$ python -m teleimager.image_server
-   
-   # The following command works the same way
-   (teleimager) unitree@PC2:~/image_server$ teleimager-server
+   (teleimager) unitree@PC2:~/teleimager$ teleimager-server
    ```
+
+   > **Note:** Use teleimager **v2.0.8** on both PC2 and the local host (the xr_teleoperate submodule is pinned to it). 1.x, 2.0.x and 2.1.x are not compatible with each other.
 
 4. On the **local host**, execute the following command to subscribe to the images
 
    ```bash
-   (tv) unitree@Host:~$ cd ~/xr_teleoperate/teleop/teleimager/src
-   (tv) unitree@Host:~/xr_teleoperate/teleop/teleimager/src$ python -m teleimager.image_client --host 192.168.123.164
+   (tv) unitree@Host:~$ teleimager-client --host 192.168.123.164
    
    # If the WebRTC image stream is set up, you can also open the URL [https://192.168.123.164:60001](https://192.168.123.164:60001) in a browser and click the Start button to test.
    ```

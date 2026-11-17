@@ -143,9 +143,13 @@ Ubuntu 20.04 と Ubuntu 22.04 でテスト済みです。他の OS では設定�
 
 ```bash
 # teleimager サブモジュールをインストール
+# 2.x 系クライアントはシステムライブラリ libjpeg-turbo（PyTurboJPEG が使用）に依存するため、先にインストールします
 (tv) unitree@Host:~/xr_teleoperate$ cd teleop/teleimager
-(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ pip install -e . --no-deps
+(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ conda install -c conda-forge libjpeg-turbo
+(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ pip install -e .
 ```
+
+> **注**: 本リポジトリは **teleimager v2.0.8** に適応しています（`teleop/teleimager` サブモジュールはこのバージョンに固定）。2.1.x では `zmq_port` が `color_port` に改名されており互換性がないため、アップグレードしないでください。PC2 の画像サービスも v2.0.8 を使用してください。
 
 ```bash
 # televuer サブモジュールをインストール
@@ -322,7 +326,7 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 
 2. 対応する Wi-Fi ホットスポットに接続します
 
-3. 頭部カメラで WebRTC を有効にしている場合（`cam_config_server.yaml → head_camera → enable_webrtc: true`）のみ、この手順を実行します。そうでない場合は手順 4 に進んでください。ブラウザ（Safari や PICO Browser など）を開き、次の URL にアクセスします: https://192.168.123.164:60001
+3. 頭部カメラで WebRTC を有効にしている場合（`~/.config/teleimager/teleimager_server.yaml → camera → head_camera → enable_webrtc: true`）のみ、この手順を実行します。そうでない場合は手順 4 に進んでください。ブラウザ（Safari や PICO Browser など）を開き、次の URL にアクセスします: https://192.168.123.164:60001
 
    > **注1**: この IP は teleimager 画像サービスを起動している PC2 デバイスの IP です。
 
@@ -413,8 +417,8 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 ```bash
 # SSH で PC2 にログインし、画像サービスプログラムのリポジトリをダウンロード
 (base) unitree@PC2:~$ cd ~
-(base) unitree@PC2:~$ git clone https://github.com/silencht/teleimager
-# teleimager リポジトリの README（https://github.com/silencht/teleimager/blob/main/README.md）に従って環境を設定
+(base) unitree@PC2:~$ git clone https://github.com/unitreerobotics/teleimager
+# teleimager リポジトリの README（https://github.com/unitreerobotics/teleimager/blob/main/README.md）に従って環境を設定
 ```
 
 2. **ローカルホスト**で以下のコマンドを実行します:
@@ -425,23 +429,22 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 (tv) unitree@Host:~$ scp ~/xr_teleoperate/teleop/televuer/key.pem ~/xr_teleoperate/teleop/televuer/cert.pem unitree@192.168.123.164:~/teleimager
 # teleimager リポジトリの README に従い、PC2 で証明書パスを設定。例:
 (teleimager) unitree@PC2:~$ cd teleimager
-(teleimager) unitree@PC2:~$ mkdir -p ~/.config/xr_teleoperate/
-(teleimager) unitree@PC2:~/teleimager$ cp cert.pem key.pem ~/.config/xr_teleoperate/
+(teleimager) unitree@PC2:~$ mkdir -p ~/.config/teleimager/
+(teleimager) unitree@PC2:~/teleimager$ cp cert.pem key.pem ~/.config/teleimager/
 ```
 
-3. **開発用計算ユニット PC2** で teleimager ドキュメントに従って `cam_config_server.yaml` を設定し、画像サービスプログラムを起動します。
+3. **開発用計算ユニット PC2** で teleimager ドキュメントに従って `teleimager_server.yaml`（初回起動時に `~/.config/teleimager/` へ自動生成）を設定し、画像サービスプログラムを起動します。
 
 ```bash
-(teleimager) unitree@PC2:~/image_server$ python -m teleimager.image_server
-# 次のコマンドでも同じ動作になります
-(teleimager) unitree@PC2:~/image_server$ teleimager-server
+(teleimager) unitree@PC2:~/teleimager$ teleimager-server
 ```
+
+> **注**: PC2 とローカルホストの teleimager はどちらも **v2.0.8** を使用してください（xr_teleoperate サブモジュールはこのバージョンに固定）。1.x、2.0.x、2.1.x の画像サービスインターフェース/プロトコルは相互に互換性がありません。
 
 4. **ローカルホスト**で以下のコマンドを実行して画像を購読します:
 
 ```bash
-(tv) unitree@Host:~$ cd ~/xr_teleoperate/teleop/teleimager/src
-(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager/src$ python -m teleimager.image_client --host 192.168.123.164
+(tv) unitree@Host:~$ teleimager-client --host 192.168.123.164
 # WebRTC 画像ストリームを設定している場合は、ブラウザで https://192.168.123.164:60001 を開き、Start ボタンをクリックしてテストできます
 ```
 

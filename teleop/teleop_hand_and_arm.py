@@ -16,7 +16,9 @@ from unitree_sdk2py.core.channel import ChannelFactoryInitialize # dds
 from televuer import TeleVuerWrapper
 from teleop.robot_control.robot_arm import G1_29_ArmController, G1_29_Arm_Internal_Dex1_Controller, G1_23_ArmController, H1_2_ArmController, H1_ArmController, H2_ArmController, R1_A5_ArmController, R1_A7_ArmController
 from teleop.robot_control.robot_arm_ik import G1_29_ArmIK, G1_23_ArmIK, H1_2_ArmIK, H1_ArmIK, H2_ArmIK, R1_A5_ArmIK, R1_A7_ArmIK
-from teleimager.image_client import ImageClient
+# Requires teleimager 2.0.x (the teleop/teleimager submodule is pinned to v2.0.8).
+# 2.1.x is not compatible: its TeleImageClient renamed zmq_port to color_port.
+from teleimager.client import TeleImageClient
 from teleop.utils.episode_writer import EpisodeWriter
 from teleop.utils.ipc import IPC_Server
 from teleop.utils.motion_switcher import MotionSwitcher, LocoClientWrapper
@@ -100,6 +102,7 @@ if __name__ == '__main__':
     if args.ee == "dex1_internal" and args.motion:
         parser.error("--ee dex1_internal does not currently support --motion.")
 
+    img_clients = {}
     try:
         # setup dds communication domains id
         if args.sim:
@@ -119,10 +122,14 @@ if __name__ == '__main__':
             listen_keyboard_thread.start()
 
         # image client
-        img_client = ImageClient(host=args.img_server_ip, request_bgr=True)
-        camera_config = img_client.get_cam_config()
+        camera_config, from_server = TeleImageClient.scan(args.img_server_ip)
+        if not from_server:
+            raise RuntimeError("Image server is unreachable; cached camera configuration is not accepted.")
         logger_mp.debug(f"Camera config: {camera_config}")
         xr_need_local_img = not (args.display_mode == 'pass-through' or camera_config['head_camera']['enable_webrtc'])
+        for topic, config in camera_config.items():
+            if config.get('enable_zmq') and (args.record or (topic == 'head_camera' and xr_need_local_img)):
+                img_clients[topic] = TeleImageClient(topic, server_host=args.img_server_ip, zmq_port=config['zmq_port'], request_bgr=True)
 
         # televuer_wrapper: obtain hand pose data from the XR device and transmit the robot's head camera image to the XR device.
         tv_wrapper = TeleVuerWrapper(use_hand_tracking=args.input_mode == "hand", 
@@ -273,7 +280,7 @@ if __name__ == '__main__':
         while not START and not STOP: # wait for start or stop signal.
             time.sleep(0.033)
             if camera_config['head_camera']['enable_zmq'] and xr_need_local_img:
-                head_img = img_client.get_head_frame()
+                head_img = img_clients['head_camera'].get_frame()
                 if head_img.bgr is not None:
                     tv_wrapper.render_to_xr(head_img.bgr)
 
@@ -289,15 +296,15 @@ if __name__ == '__main__':
             # get image
             if camera_config['head_camera']['enable_zmq']:
                 if args.record or xr_need_local_img:
-                    head_img = img_client.get_head_frame()
+                    head_img = img_clients['head_camera'].get_frame()
                 if xr_need_local_img and head_img.bgr is not None:
                     tv_wrapper.render_to_xr(head_img.bgr)
             if camera_config['left_wrist_camera']['enable_zmq']:
                 if args.record:
-                    left_wrist_img = img_client.get_left_wrist_frame()
+                    left_wrist_img = img_clients['left_wrist_camera'].get_frame()
             if camera_config['right_wrist_camera']['enable_zmq']:
                 if args.record:
-                    right_wrist_img = img_client.get_right_wrist_frame()
+                    right_wrist_img = img_clients['right_wrist_camera'].get_frame()
 
             # record mode
             if args.record and RECORD_TOGGLE:
@@ -546,7 +553,7 @@ if __name__ == '__main__':
             logger_mp.error(f"Failed to stop keyboard listener or ipc server: {e}")
         
         try:
-            if img_client is not None:
+            for img_client in img_clients.values():
                 img_client.close()
         except Exception as e:
             logger_mp.error(f"Failed to close image client: {e}")

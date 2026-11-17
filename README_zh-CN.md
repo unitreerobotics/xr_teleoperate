@@ -143,9 +143,13 @@
 
 ```bash
 # 安装 teleimager 模块
+# 2.x 版客户端依赖系统库 libjpeg-turbo（PyTurboJPEG 使用），请先安装
 (tv) unitree@Host:~/xr_teleoperate$ cd teleop/teleimager
-(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ pip install -e . --no-deps
+(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ conda install -c conda-forge libjpeg-turbo
+(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager$ pip install -e .
 ```
+
+> 注意：本仓库适配 **teleimager v2.0.8**（`teleop/teleimager` 子模块已固定在该版本）。请勿升级到 2.1.x，2.1.x 将 `zmq_port` 改名为 `color_port`，与本仓库代码不兼容；PC2 图像服务也请使用 v2.0.8。
 
 ```bash
 # 安装 televuer 模块
@@ -327,7 +331,7 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 
 2. 连接对应的 WiFi 热点
 
-3. 如果您头部相机开启了WebRTC功能（`cam_config_server.yaml => head_camera => enable_webrtc: true`），那么执行此步骤，否则直接跳到第 4 步。打开浏览器应用（比如 Safari 或 PICO Browser），输入并访问网址：https://192.168.123.164:60001
+3. 如果您头部相机开启了WebRTC功能（`~/.config/teleimager/teleimager_server.yaml => camera => head_camera => enable_webrtc: true`），那么执行此步骤，否则直接跳到第 4 步。打开浏览器应用（比如 Safari 或 PICO Browser），输入并访问网址：https://192.168.123.164:60001
 
    > 注意1：此 IP 地址为开启teleimager图像服务的 PC2 设备 IP
 
@@ -416,8 +420,8 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 ```bash
 # ssh登录PC2，下载图像服务程序仓库
 (base) unitree@PC2:~$ cd ~
-(base) unitree@PC2:~$ git clone https://github.com/silencht/teleimager
-# 根据 teleimager 仓库的 https://github.com/silencht/teleimager/blob/main/README.md 文档说明来配置环境
+(base) unitree@PC2:~$ git clone https://github.com/unitreerobotics/teleimager
+# 根据 teleimager 仓库的 https://github.com/unitreerobotics/teleimager/blob/main/README.md 文档说明来配置环境
 ```
 
 2. 在**本地主机**上执行以下命令：
@@ -426,25 +430,24 @@ build  cert.pem  key.pem  LICENSE  pyproject.toml  README.md  rootCA.key  rootCA
 # 将本地主机 xr_teleoperate/teleop/televuer 路径下在 1.1 节配置的 key.pem 和 cert.pem 文件拷贝到 PC2 对应路径
 # 这两个文件是 teleimager 启动 WebRTC 服务时所必须的
 (tv) unitree@Host:~$ scp ~/xr_teleoperate/teleop/televuer/key.pem ~/xr_teleoperate/teleop/televuer/cert.pem unitree@192.168.123.164:~/teleimager
-# 根据 teleimager 仓库的 https://github.com/silencht/teleimager/blob/main/README.md 文档说明，在PC2配置证书路径，例如
+# 根据 teleimager 仓库的 https://github.com/unitreerobotics/teleimager/blob/main/README.md 文档说明，在PC2配置证书路径，例如
 (teleimager) unitree@PC2:~$ cd teleimager
-(teleimager) unitree@PC2:~$ mkdir -p ~/.config/xr_teleoperate/
-(teleimager) unitree@PC2:~/teleimager$ cp cert.pem key.pem ~/.config/xr_teleoperate/
+(teleimager) unitree@PC2:~$ mkdir -p ~/.config/teleimager/
+(teleimager) unitree@PC2:~/teleimager$ cp cert.pem key.pem ~/.config/teleimager/
 ```
 
-3. 在**开发计算单元 PC2** 中按照 teleimager 文档配置 cam_config_server.yaml 并启动图像服务程序
+3. 在**开发计算单元 PC2** 中按照 teleimager 文档配置 teleimager_server.yaml（首次启动会自动生成到 `~/.config/teleimager/`）并启动图像服务程序
 
 ```bash
-(teleimager) unitree@PC2:~/image_server$ python -m teleimager.image_server
-# 下面命令作用相同
-(teleimager) unitree@PC2:~/image_server$ teleimager-server
+(teleimager) unitree@PC2:~/teleimager$ teleimager-server
 ```
+
+> 注意：PC2 上的 teleimager 与本地主机的 xr_teleoperate 子模块请都使用 **v2.0.8**；1.x、2.0.x、2.1.x 之间的图像服务接口/协议互不兼容。
 
 4. 在**本地主机**上执行以下命令订阅图像：
 
 ```bash
-(tv) unitree@Host:~$ cd ~/xr_teleoperate/teleop/teleimager/src
-(tv) unitree@Host:~/xr_teleoperate/teleop/teleimager/src$ python -m teleimager.image_client --host 192.168.123.164
+(tv) unitree@Host:~$ teleimager-client --host 192.168.123.164
 # 如果设置了 WebRTC 图像流，那么可以在浏览器中通过 https://192.168.123.164:60001 打开网址，随后点击 Start 按钮进行测试 
 ```
 
