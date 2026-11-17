@@ -356,3 +356,113 @@ class Inspire_Left_Hand_JointIndex(IntEnum):
     kLeftHandIndex = 9
     kLeftHandThumbBend = 10
     kLeftHandThumbRotation = 11
+
+
+class Inspire_Controller_Ctrl:
+    """Controller-mode inspire_dfx hand control (NO hand tracking) for walk+grasp.
+
+    Fed from teleop's main loop only while in FINGER mode. Per-hand input array is Array('d', 6):
+        [stick_x, stick_y, triggerValue, squeezeValue, toward_btn, away_btn]
+      stick: thumbstick (front=(0,-1), right=(1,0));  triggerValue 10=none..0=full;
+      squeezeValue 0=none..1=full;  toward_btn/away_btn: 0.0/1.0 (thumb-rotation buttons).
+
+    Targets are held in the DDS q space [0,1] (0=closed, 1=open) and rate-integrated. Inspire idx
+    (matches the JointIndex enums): 0 pinky, 1 ring, 2 middle, 3 index, 4 thumb-bend, 5 thumb-rot.
+
+    Control map (per the spec):
+      - trigger  -> thumb-bend curl IN  (idx4 -> closed)
+      - grip     -> thumb-bend curl OUT (idx4 -> open)
+      - toward_btn (Y/B) -> thumb-rotation toward palm (idx5 -> 0)  [flip TOWARD_SIGN if backwards]
+      - away_btn   (X/A) -> thumb-rotation away  from palm (idx5 -> 1)
+      - thumbstick 8 directions drive the 4 fingers, one at a time (must be near a direction):
+          forward=index close / back=index open;  right=middle close / left=middle open;
+          NE=ring close / SW=ring open;            NW=pinky close / SE=pinky open.
+    """
+    STEP = 0.01          # per-frame move (at fps) -> full range in ~1.0 s (halved from 0.02)
+    MAG_THRESH = 0.6     # thumbstick must be pushed this far to move a finger
+    DOT_THRESH = 0.94    # ~within 20 deg of one of the 8 directions -> only one finger at a time
+    TOWARD_SIGN = -1.0   # sign applied to idx5 for "toward palm" (flip to +1.0 if it goes the wrong way)
+
+    def __init__(self, left_ctrl_input, right_ctrl_input, fps=100.0, simulation_mode=False):
+        logger_mp.info("Initialize Inspire_Controller_Ctrl...")
+        self.fps = fps
+        self.HandCmb_publisher = ChannelPublisher(kTopicInspireDFXCommand, MotorCmds_)
+        self.HandCmb_publisher.Init()
+        self.HandState_subscriber = ChannelSubscriber(kTopicInspireDFXState, MotorStates_)
+        self.HandState_subscriber.Init()
+        self.left_hand_state_array  = Array('d', Inspire_Num_Motors, lock=True)
+        self.right_hand_state_array = Array('d', Inspire_Num_Motors, lock=True)
+        self.subscribe_state_thread = threading.Thread(target=self._subscribe_hand_state)
+        self.subscribe_state_thread.daemon = True
+        self.subscribe_state_thread.start()
+        t0 = time.time()
+        while not any(self.right_hand_state_array):
+            time.sleep(0.01)
+            if time.time() - t0 > 3.0:
+                logger_mp.warning("[Inspire_Controller_Ctrl] Waiting to subscribe dds...")
+                t0 = time.time()
+        logger_mp.info("[Inspire_Controller_Ctrl] Subscribe dds ok.")
+        p = Process(target=self.control_process, args=(left_ctrl_input, right_ctrl_input))
+        p.daemon = True
+        p.start()
+        logger_mp.info("Initialize Inspire_Controller_Ctrl OK!")
+
+    def _subscribe_hand_state(self):
+        while True:
+            hand_msg = self.HandState_subscriber.Read()
+            if hand_msg is not None:
+                for idx, id in enumerate(Inspire_Left_Hand_JointIndex):
+                    self.left_hand_state_array[idx] = hand_msg.states[id].q
+                for idx, id in enumerate(Inspire_Right_Hand_JointIndex):
+                    self.right_hand_state_array[idx] = hand_msg.states[id].q
+            time.sleep(0.002)
+
+    def ctrl_dual_hand(self, left_q_target, right_q_target):
+        for idx, id in enumerate(Inspire_Left_Hand_JointIndex):
+            self.hand_msg.cmds[id].q = float(left_q_target[idx])
+        for idx, id in enumerate(Inspire_Right_Hand_JointIndex):
+            self.hand_msg.cmds[id].q = float(right_q_target[idx])
+        self.HandCmb_publisher.Write(self.hand_msg)
+
+    def control_process(self, left_ctrl_input, right_ctrl_input):
+        self.hand_msg = MotorCmds_()
+        self.hand_msg.cmds = [unitree_go_msg_dds__MotorCmd_()
+                              for _ in range(len(Inspire_Right_Hand_JointIndex) + len(Inspire_Left_Hand_JointIndex))]
+        # persistent targets in DDS q space [0,1]; start fully OPEN (q=1)
+        L = np.full(Inspire_Num_Motors, 1.0)
+        R = np.full(Inspire_Num_Motors, 1.0)
+        s = 0.70710678
+        # (dx, dy, finger_idx, delta_sign): close = -1 (-> 0),  open = +1 (-> 1). fwd = -y, right = +x.
+        DIRS = [
+            (0.0, -1.0, 3, -1.0), (0.0,  1.0, 3, +1.0),   # index: forward close / back open
+            (1.0,  0.0, 2, -1.0), (-1.0, 0.0, 2, +1.0),   # middle: right close / left open
+            ( s,   -s,  1, -1.0), (-s,    s,  1, +1.0),   # ring: NE close / SW open
+            (-s,   -s,  0, -1.0), ( s,    s,  0, +1.0),   # pinky: NW close / SE open
+        ]
+
+        def clip01(v):
+            return 0.0 if v < 0.0 else (1.0 if v > 1.0 else v)
+
+        while True:
+            for inp, T in ((left_ctrl_input, L), (right_ctrl_input, R)):
+                sx, sy, trig, sqz, toward, away = inp[0], inp[1], inp[2], inp[3], inp[4], inp[5]
+                # thumb bend (idx4): trigger curls IN (->0); grip curls OUT (->1)
+                if trig < 5.0:
+                    T[4] = clip01(T[4] - self.STEP)
+                if sqz > 0.5:
+                    T[4] = clip01(T[4] + self.STEP)
+                # thumb rotation (idx5): toward palm / away (TOWARD_SIGN flips if reversed)
+                if toward > 0.5:
+                    T[5] = clip01(T[5] + self.TOWARD_SIGN * self.STEP)
+                if away > 0.5:
+                    T[5] = clip01(T[5] - self.TOWARD_SIGN * self.STEP)
+                # fingers (idx0-3): thumbstick 8 directions, one finger at a time
+                mag = (sx * sx + sy * sy) ** 0.5
+                if mag > self.MAG_THRESH:
+                    ux, uy = sx / mag, sy / mag
+                    best = max(DIRS, key=lambda d: ux * d[0] + uy * d[1])
+                    if ux * best[0] + uy * best[1] > self.DOT_THRESH:
+                        fi, sgn = best[2], best[3]
+                        T[fi] = clip01(T[fi] + sgn * self.STEP)
+            self.ctrl_dual_hand(L, R)
+            time.sleep(1.0 / self.fps)
