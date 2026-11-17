@@ -138,6 +138,8 @@ For more information, you can refer to [Official Documentation ](https://support
 (tv) unitree@Host:~$ cd xr_teleoperate
 # Shallow clone submodule
 (tv) unitree@Host:~/xr_teleoperate$ git submodule update --init --depth 1
+# Install supplemental Python dependencies listed by this repo
+(tv) unitree@Host:~/xr_teleoperate$ pip install -r requirements.txt
 ```
 
 ```bash
