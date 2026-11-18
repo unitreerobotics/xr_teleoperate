@@ -1,12 +1,30 @@
+import os
+
+# Cap BLAS / OpenMP threading BEFORE numpy (and pinocchio / casadi) are imported.
+#
+# The arm IK is a 14-DoF problem -- far too small to parallelise. Left at its default,
+# OpenBLAS starts one thread per core; on an 8-core Jetson that meant 35 threads and
+# ~392% CPU in the main process, where synchronisation overhead dominated and starved
+# the video pipeline. Measured on-robot, with identical IPOPT iteration counts:
+#
+#     default threading : IK mean 15.9 ms, p95 33-44 ms  -> control loop ~10 Hz
+#     threads = 1       : IK mean  4.0 ms, p95  5-6  ms  -> control loop 29-30 Hz
+#
+# x86 benefits slightly too (p95 3.3 -> 2.6 ms), so this is applied unconditionally.
+# setdefault leaves any value you export yourself untouched.
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+             "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ.setdefault(_var, "1")
+
 import time
 import argparse
 from multiprocessing import Value, Array, Lock
 import threading
 import logging_mp
-logging_mp.basicConfig(level=logging_mp.INFO)
+# TELEOP_LOG_LEVEL=DEBUG surfaces the per-frame "ik:" and "main process sleep:" timings.
+logging_mp.basicConfig(level=getattr(logging_mp, os.environ.get("TELEOP_LOG_LEVEL", "INFO").upper(), logging_mp.INFO))
 logger_mp = logging_mp.getLogger(__name__)
 
-import os 
 import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
